@@ -1,0 +1,2 @@
+vendor/*.whl filter=lfs diff=lfs merge=lfs -text
+vendor/SHA256SUMS text eol=lf
