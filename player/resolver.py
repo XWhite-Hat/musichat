@@ -10,6 +10,7 @@ Never call from the Qt main thread — yt-dlp can take several seconds.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Optional
 
 from player.queue_manager import RequestOrigin, Track, TrackSource
@@ -19,6 +20,24 @@ from player.queue_manager import RequestOrigin, Track, TrackSource
 _URL_PREFIXES = ("http://", "https://", "www.")
 _SC_DOMAINS   = ("soundcloud.com",)
 _YT_DOMAINS   = ("youtube.com", "youtu.be", "music.youtube.com")
+
+# Unicode categories that are always invisible or non-printing: control
+# (Cc), format (Cf — zero-width space/joiners, tag characters), private-use
+# and surrogate (Co, Cs), and combining marks (Mn, Mc, Me).  Twitch chat
+# users/bots commonly append one of these — most often a combining grapheme
+# joiner or zero-width space — to dodge Twitch's duplicate-message filter.
+# str.strip() only removes whitespace, so it rides straight through into the
+# yt-dlp search string and makes an otherwise-valid request return zero
+# results.  Chat song requests are exactly the case where a stray character
+# has no legitimate meaning worth preserving, so we strip the whole class.
+_INVISIBLE_CATEGORIES = {"Cc", "Cf", "Co", "Cs", "Mn", "Mc", "Me"}
+
+
+def _sanitize_query(query: str) -> str:
+    cleaned = "".join(
+        ch for ch in query if unicodedata.category(ch) not in _INVISIBLE_CATEGORIES
+    )
+    return cleaned.strip()
 
 
 def _is_url(query: str) -> bool:
@@ -47,12 +66,16 @@ def resolve(
 
     Returns None on failure (network error, yt-dlp not found, no results).
     """
+    query = _sanitize_query(query)
+    if not query:
+        return None
+
     if _is_url(query):
-        target = query.strip()
+        target = query
         source = _source_from_url(target)
     else:
         # YouTube search — wrap in ytsearch prefix
-        target = f"ytsearch1:{query.strip()}"
+        target = f"ytsearch1:{query}"
         source = TrackSource.YOUTUBE
 
     from player.ytdlp_util import dump_info

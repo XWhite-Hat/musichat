@@ -70,16 +70,46 @@ RESTART_REQUIRED: Set[str] = {
 
 _settings_ws_manager: "Optional[_WSManager]" = None
 
-# Last-known tunnel status — cached so GET /api/tunnel/status works on page load
-# even before a WS connection is established.
-_tunnel_status: dict = {"url": None, "online": False}
+# Last-known tunnel status — cached so GET /api/tunnel/status works on page
+# load even before a WS connection is established, and so a state that
+# happened before the settings page was ever opened (an error, a restart in
+# progress) is still visible instead of silently showing a "start tunnel"
+# button as if nothing were wrong.
+#
+# status is the authoritative field for the settings page's UI logic:
+#   "offline"     — not running, safe to start
+#   "connecting"  — start requested, no URL confirmed yet
+#   "verifying"   — URL found, confirming it actually routes traffic
+#   "live"        — confirmed reachable
+#   "restarting"  — self-healing after a failed reachability check
+#   "failed"      — self-heal exhausted its retry budget; needs manual restart
+_tunnel_status: dict = {
+    "status": "offline", "url": None, "online": False, "error": None, "fatal": False,
+}
 
 
 def broadcast_to_settings(msg: dict) -> None:
     """Push *msg* to every connected settings-page WebSocket client (thread-safe)."""
     global _tunnel_status
     if msg.get("type") == "tunnel_status":
-        _tunnel_status = {"url": msg.get("url"), "online": bool(msg.get("online"))}
+        online = bool(msg.get("online"))
+        fatal = bool(msg.get("fatal"))
+        has_error = bool(msg.get("error"))
+        # Derive a status if the caller didn't set one explicitly, so any
+        # broadcast that predates this field still degrades sensibly.
+        status = msg.get("status") or (
+            "live" if online else
+            "failed" if fatal else
+            "restarting" if has_error else
+            "offline"
+        )
+        _tunnel_status = {
+            "status": status,
+            "url": msg.get("url"),
+            "online": online,
+            "error": msg.get("error"),
+            "fatal": fatal,
+        }
     if _settings_ws_manager is not None:
         _settings_ws_manager.broadcast_sync(msg)
 
@@ -845,6 +875,14 @@ def create_settings_app(
     async def tunnel_start():
         if not tunnel_start_cb:
             return JSONResponse({"error": "tunnel control not available"}, status_code=503)
+        # Defense in depth — the settings page already disables the Start
+        # button while connecting/live/restarting, but reject server-side too
+        # (stale tab, double-click, direct API call) rather than tearing down
+        # an in-progress attempt just to spawn an identical one.
+        if _tunnel_status.get("status") in ("connecting", "live", "restarting"):
+            return JSONResponse(
+                {"error": f"tunnel is already {_tunnel_status['status']}"}, status_code=409
+            )
         import threading as _t
         _t.Thread(target=tunnel_start_cb, daemon=True, name="TunnelStart").start()
         return {"ok": True, "message": "Starting tunnel — URL will arrive via WebSocket"}
@@ -875,6 +913,8 @@ def create_settings_app(
             return JSONResponse({"error": "not available"}, status_code=503)
         try:
             body = await request.json()
+            if not isinstance(body, dict):
+                body = {}
         except Exception:
             body = {}
         remove_pyside6 = bool(body.get("remove_pyside6", True))
@@ -887,6 +927,8 @@ def create_settings_app(
         """Return what MusicHat data already exists at the given path."""
         try:
             body = await request.json()
+            if not isinstance(body, dict):
+                body = {}
         except Exception:
             body = {}
         from pathlib import Path as _Path

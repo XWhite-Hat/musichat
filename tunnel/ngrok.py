@@ -34,11 +34,11 @@ class NgrokTunnel(TunnelBase):
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
 
-    def start(self) -> None:
+    def _do_start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def _do_stop(self) -> None:
         if self._proc:
             self._proc.terminate()
             try:
@@ -68,7 +68,11 @@ class NgrokTunnel(TunnelBase):
             )
 
             # Poll the local ngrok API (127.0.0.1:4040) for the assigned URL
-            for _ in range(30):
+            for attempt in range(1, 31):
+                if self._stop_requested:
+                    return
+                if attempt == 1 or attempt % 5 == 0:
+                    self._emit_progress(f"waiting for ngrok to assign a URL... ({attempt}/30)")
                 time.sleep(1)
                 try:
                     resp = requests.get(
@@ -77,19 +81,16 @@ class NgrokTunnel(TunnelBase):
                     tunnels = resp.json().get("tunnels", [])
                     for t in tunnels:
                         if t.get("proto") == "https":
-                            self.public_url = t["public_url"]
-                            if self.on_url_assigned:
-                                self.on_url_assigned(self.public_url)
+                            self._verify_and_announce(t["public_url"])
                             return
                 except Exception:
                     pass
 
-            if self.on_error:
-                self.on_error("ngrok started but no URL was assigned within 30 seconds")
+            if not self._stop_requested:
+                self._restart_or_give_up()
+            return
 
         except FileNotFoundError:
-            if self.on_error:
-                self.on_error("ngrok not found. Install from https://ngrok.com/download")
+            self._emit_error("ngrok not found. Install from https://ngrok.com/download", fatal=True)
         except Exception as e:
-            if self.on_error:
-                self.on_error(str(e))
+            self._emit_error(str(e), fatal=True)

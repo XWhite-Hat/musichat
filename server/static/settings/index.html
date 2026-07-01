@@ -1419,7 +1419,7 @@ async function loadStatus() {
 async function loadTunnelStatus() {
   try {
     const t = await api('GET', '/api/tunnel/status');
-    setTunnelStatus(t.url || null, !!t.online);
+    setTunnelStatus(t.url || null, t.status, t.error || null);
   } catch {}
 }
 
@@ -2211,9 +2211,11 @@ function connectWS() {
         break;
       }
       case 'tunnel_status':
-        setTunnelStatus(msg.url || null, !!msg.online, msg.error || null);
-        if (msg.online && msg.url) {
+        setTunnelStatus(msg.url || null, msg.status, msg.error || null);
+        if (msg.status === 'live' && msg.url) {
           toast(`tunnel live: ${msg.url}`, 'ok');
+        } else if (msg.status === 'failed') {
+          toast('tunnel auto-start failed — see tunnel section for details', 'error');
         } else if (msg.error) {
           toast('tunnel error — see tunnel section for details', 'error');
         }
@@ -2230,7 +2232,9 @@ function connectWS() {
     }
     // Seed state from the init message (sent on every new WS connection)
     if (msg.type === 'init') {
-      if (msg.tunnel) setTunnelStatus(msg.tunnel.url || null, !!msg.tunnel.online);
+      if (msg.tunnel) {
+        setTunnelStatus(msg.tunnel.url || null, msg.tunnel.status, msg.tunnel.error || null);
+      }
       if (msg.status) { Object.assign(status, msg.status); updateAuthUI(); }
     }
   };
@@ -2984,9 +2988,14 @@ async function tunnelStart() {
   await flushPatches();
   try {
     await api('POST', '/api/tunnel/start');
-    // URL arrives via WebSocket tunnel_status message — no polling needed
+    // Status (connecting → live/restarting/failed) arrives via WebSocket —
+    // no polling needed.
   } catch (e) {
-    setTunnelStatus(null, false, e.message);
+    // Don't guess a status here — e.g. a 409 means it's already running,
+    // and forcing 'offline' would wrongly re-enable Start on top of a live
+    // tunnel.  Let the next tunnel_status push (which reflects reality)
+    // correct the display; just surface why the click didn't do anything.
+    toast(`tunnel start failed: ${e.message}`, 'error');
   }
 }
 
@@ -2994,34 +3003,56 @@ async function tunnelStop() {
   try {
     await api('POST', '/api/tunnel/stop');
   } catch {}
-  setTunnelStatus(null, false);
+  setTunnelStatus(null, 'offline');
 }
 
-function setTunnelStatus(url, online, error) {
-  const urlEl  = document.getElementById('tunnel-url-display');
+// status: 'offline' | 'connecting' | 'verifying' | 'live' | 'restarting' | 'failed'
+function setTunnelStatus(url, status, error) {
+  const urlEl    = document.getElementById('tunnel-url-display');
   const startBtn = document.getElementById('tunnel-start-btn');
   const stopBtn  = document.getElementById('tunnel-stop-btn');
-  const errEl  = document.getElementById('tunnel-error');
+  const errEl    = document.getElementById('tunnel-error');
 
-  if (online && url) {
-    urlEl.textContent = url;
-    urlEl.style.color = 'var(--accent)';
-    startBtn.style.display = 'none';
-    stopBtn.style.display  = '';
-    stopBtn.disabled = false;
-    errEl.style.display = 'none';
+  status = status || 'offline';
+
+  const STATUS_TEXT = {
+    offline:    '',
+    connecting: 'connecting...',
+    verifying:  'verifying...',
+    live:       url || '',
+    restarting: 'restarting...',
+    failed:     'auto-start failed',
+  };
+
+  // offline/failed are the only states with no tunnel process already doing
+  // something — those are the only ones where clicking Start makes sense.
+  // Everything else shows Stop instead, so there's never a "Start Tunnel"
+  // button sitting there implying nothing is happening when it is.
+  const canStart = status === 'offline' || status === 'failed';
+
+  startBtn.style.display = canStart ? '' : 'none';
+  startBtn.disabled = !canStart;
+  stopBtn.style.display = canStart ? 'none' : '';
+  stopBtn.disabled = false;
+
+  // Progress detail ("verifying tunnel is routing traffic... (2/6)") shows
+  // inline in place of the generic placeholder for connecting/verifying —
+  // but for restarting/failed the detailed message belongs solely in the
+  // error box below; showing it here too was just duplicating it.
+  const showInline = error && (status === 'connecting' || status === 'verifying');
+  urlEl.textContent = showInline ? error : (STATUS_TEXT[status] ?? '');
+  urlEl.style.color =
+    status === 'live' ? 'var(--accent)' :
+    (status === 'failed' || status === 'restarting') ? 'var(--danger)' :
+    'var(--dim)';
+
+  // The red error box is reserved for actual problems — connecting/verifying
+  // progress messages show inline above instead of looking like a failure.
+  if (error && (status === 'failed' || status === 'restarting')) {
+    errEl.textContent = (status === 'failed' ? 'Auto-start failed: ' : '') + error;
+    errEl.style.display = '';
   } else {
-    urlEl.textContent = url ? url : (online ? 'connecting...' : '');
-    urlEl.style.color = 'var(--dim)';
-    startBtn.style.display = '';
-    startBtn.disabled = false;
-    stopBtn.style.display  = 'none';
-    if (error) {
-      errEl.textContent = error;
-      errEl.style.display = '';
-    } else {
-      errEl.style.display = 'none';
-    }
+    errEl.style.display = 'none';
   }
 }
 

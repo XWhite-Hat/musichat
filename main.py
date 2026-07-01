@@ -154,31 +154,55 @@ def _start_tunnel(cfg, window: MainWindow, tunnel_ref: list) -> None:
 
     def on_url(url: str) -> None:
         service = _service_labels.get(mode, "tunnel")
-        _gui(lambda: window.set_tunnel_status(service, "green", copy_url=url))
-        from server.settings_app import broadcast_to_settings
-        broadcast_to_settings({"type": "tunnel_status", "url": url, "online": True})
-        # Push the new tunnel origin to the Worker so mod logins from this URL
-        # are accepted.  Runs in a daemon thread so it never blocks the UI.
+
+        # Register the new origin with the Worker BEFORE announcing the
+        # tunnel as live.  on_url_assigned already fires from the tunnel's
+        # own background thread (after its own reachability check passes),
+        # so blocking here doesn't touch the UI thread — but it does close
+        # the real race: a mod who already has this URL (pinned from a
+        # previous stream, or just fast) could hit /mod-login on the Worker
+        # in the gap between "tunnel is live" and "Worker knows the new
+        # origin" and get rejected even though the tunnel itself is fine.
         from constants import TWITCH_WORKER_URL, is_byoi_mode
         if not is_byoi_mode() and cfg.twitch.streamer_token and cfg.twitch.streamer_id:
             from server.auth import update_panel_origin as _upo
-            threading.Thread(
-                target=_upo,
-                args=(url, cfg.twitch.streamer_token, cfg.twitch.streamer_id, TWITCH_WORKER_URL),
-                daemon=True,
-            ).start()
+            _upo(url, cfg.twitch.streamer_token, cfg.twitch.streamer_id, TWITCH_WORKER_URL)
 
-    def on_err(msg: str) -> None:
-        _gui(lambda: window.set_tunnel_status(f"error: {msg[:60]}", "red"))
+        _gui(lambda: window.set_tunnel_status(service, "green", copy_url=url))
         from server.settings_app import broadcast_to_settings
-        broadcast_to_settings({"type": "tunnel_status", "url": None, "online": False,
-                                "error": msg})  # no truncation — settings page wraps
+        broadcast_to_settings({"type": "tunnel_status", "status": "live",
+                                "url": url, "online": True})
+
+    def on_err(msg: str, fatal: bool = False) -> None:
+        if fatal:
+            _gui(lambda: window.set_tunnel_status("auto-start failed", "grey"))
+        else:
+            _gui(lambda: window.set_tunnel_status("error: (restarting)", "red"))
+        from server.settings_app import broadcast_to_settings
+        broadcast_to_settings({
+            "type": "tunnel_status",
+            "status": "failed" if fatal else "restarting",
+            "url": None, "online": False,
+            "error": msg, "fatal": fatal,  # no truncation — settings page wraps
+        })
+
+    def on_progress(msg: str) -> None:
+        # Non-error status update — the tunnel hasn't failed, but a
+        # verification/wait window can take a while and shouldn't look stuck.
+        _gui(lambda: window.set_tunnel_status(msg[:60], "yellow"))
+        from server.settings_app import broadcast_to_settings
+        broadcast_to_settings({"type": "tunnel_status", "status": "verifying",
+                                "url": None, "online": False, "error": msg})
 
     t.on_url_assigned = on_url
     t.on_error = on_err
+    t.on_progress = on_progress
     tunnel_ref[0] = t
     service = _service_labels.get(mode, "tunnel")
     window.set_tunnel_status(f"{service}: connecting", "yellow")
+    from server.settings_app import broadcast_to_settings
+    broadcast_to_settings({"type": "tunnel_status", "status": "connecting",
+                            "url": None, "online": False})
     t.start()
 
 
@@ -578,7 +602,8 @@ def _start_settings_server(
         if win:
             _gui(lambda: win.set_tunnel_status("stopped", "grey"))
         from server.settings_app import broadcast_to_settings
-        broadcast_to_settings({"type": "tunnel_status", "url": None, "online": False})
+        broadcast_to_settings({"type": "tunnel_status", "status": "offline",
+                                "url": None, "online": False})
 
     def device_changed(device):
         win = window_ref[0]

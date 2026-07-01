@@ -340,6 +340,8 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
             body = await request.json()
         except Exception:
             return JSONResponse({"error": "invalid_body"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_body"}, status_code=400)
 
         state    = (body.get("state") or "").strip()
         mod_code = (body.get("mod_code") or "").strip()
@@ -515,6 +517,8 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
         try:
             body = await request.json()
         except Exception:
+            return JSONResponse({"error": "invalid_body"}, status_code=400)
+        if not isinstance(body, dict):
             return JSONResponse({"error": "invalid_body"}, status_code=400)
         url = (body.get("url") or "").strip()
         if not url:
