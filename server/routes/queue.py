@@ -178,27 +178,25 @@ def _schedule_broadcast() -> None:
 def _require_auth(
     request: Request,
     creds: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-):
-    from server.auth import verify_jwt, get_mod_dpop_jwk
-    username = verify_jwt(creds.credentials, _jwt_secret)
-    if not username:
+) -> str:
+    from server.auth import verify_jwt
+    payload = verify_jwt(creds.credentials, _jwt_secret)
+    if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    username = payload["sub"]
 
-    # DPoP verification (Channel B)
-    from server.auth import dpop_grace_active
-    jwk = get_mod_dpop_jwk(username)
-    if jwk is None:
-        # No JWK registered — only allow during the startup grace window.
-        if not dpop_grace_active():
-            raise HTTPException(status_code=401, detail="DPoP registration required")
-    else:
-        proof = request.headers.get("DPoP", "")
-        if not proof:
-            raise HTTPException(status_code=401, detail="DPoP proof required")
-        from dpop_utils import verify_proof
-        htu = str(request.url).split("?")[0]
-        if not verify_proof(proof, request.method, htu, jwk):
-            raise HTTPException(status_code=401, detail="Invalid DPoP proof")
+    # DPoP verification (Channel B) — the proof's key must hash to the
+    # thumbprint bound into this token at issuance (cnf.jkt, RFC 9449 §6.1).
+    jkt = (payload.get("cnf") or {}).get("jkt")
+    if not jkt:
+        raise HTTPException(status_code=401, detail="Token missing DPoP binding — please sign in again")
+    proof = request.headers.get("DPoP", "")
+    if not proof:
+        raise HTTPException(status_code=401, detail="DPoP proof required")
+    from dpop_utils import verify_proof
+    htu = str(request.url).split("?")[0]
+    if not verify_proof(proof, request.method, htu, jkt):
+        raise HTTPException(status_code=401, detail="Invalid DPoP proof")
 
     return username
 
@@ -442,10 +440,7 @@ async def queue_live(websocket: WebSocket):
     _ws_clients.append(websocket)
     try:
         # Push current state immediately on connect
-        data = _queue_manager.to_dict()
-        data["log"] = list(_action_log)[-20:]
-        data["state"] = _player_state()
-        await websocket.send_json(data)
+        await websocket.send_json(_state_payload())
         # Hold connection open — server pushes all updates
         while True:
             await websocket.receive_text()  # ignore client pings, just keep alive
@@ -467,9 +462,7 @@ def _player_state() -> str:
 async def _broadcast_queue_state() -> None:
     if not _ws_clients:
         return
-    data = _queue_manager.to_dict()
-    data["log"] = list(_action_log)[-20:]
-    data["state"] = _player_state()
+    data = _state_payload()
     dead = []
     for ws in _ws_clients:
         try:

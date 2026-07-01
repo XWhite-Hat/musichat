@@ -438,26 +438,30 @@
   </footer>
 </div><!-- .page -->
 
+<script src="/static/dpop.js"></script>
 <script>
   // ── DPoP (Channel B: mod browser → streamer PC) ───────────────────────────
-  // Ephemeral EC P-256 keypair generated once per session at page load.
-  // Private key is non-extractable (extractable:false); per the WebCrypto spec
-  // the public key is always extractable for EC key pairs regardless of this flag.
+  // The keypair is generated on the /auth/callback page and its thumbprint is
+  // baked into the JWT (cnf.jkt) at issuance — see server/app.py.  This page
+  // loads that same keypair back out of IndexedDB (dpop.js) rather than
+  // generating a new one, since a fresh key wouldn't match the jkt the
+  // server already committed to.
   let _dpopKeyPair = null;
   let _dpopPublicJwk = null;
 
   async function initDPoP() {
     try {
-      _dpopKeyPair = await crypto.subtle.generateKey(
-        { name: 'ECDSA', namedCurve: 'P-256' },
-        false,  // private key cannot be exported
-        ['sign', 'verify']
-      );
-      const jwk = await crypto.subtle.exportKey('jwk', _dpopKeyPair.publicKey);
-      delete jwk.d;          // strip private component if somehow present
-      delete jwk.key_ops;    // strip usage hints (not needed for verification)
-      delete jwk.ext;
-      _dpopPublicJwk = jwk;
+      let keyPair = await dpopLoadKeyPair();
+      if (!keyPair) {
+        // No persisted key — e.g. a bare page reload with no fresh login.
+        // Generating one here won't match any already-issued token's jkt,
+        // so DPoP-gated calls will fail until the next real login; that's
+        // expected and handled the same as any other 401 (re-auth).
+        keyPair = await dpopGenerateKeyPair();
+        await dpopSaveKeyPair(keyPair);
+      }
+      _dpopKeyPair = keyPair;
+      _dpopPublicJwk = await dpopExportPublicJwk(keyPair);
     } catch (e) {
       console.warn('[dpop] initDPoP failed — DPoP disabled for this session:', e);
     }
@@ -495,8 +499,9 @@
   let ws = null;
   let _wsActive = false;  // false = intentionally disconnected (sign-out)
 
-  // Initialise DPoP keypair early — before login redirect or JWT check
-  initDPoP();
+  // DPoP keypair is generated inside init(), after confirming a JWT exists —
+  // any keypair made here on the pre-login page would just be thrown away by
+  // the full-page reload that finishes the Twitch OAuth redirect.
 
   function startTwitchAuth() {
     // All OAuth URL building happens server-side — just redirect to /login.
@@ -552,23 +557,17 @@
     jwt = getToken();
     if (!jwt) { showLogin(); return; }
 
-    const resp = await fetch('/me', { headers: { Authorization: 'Bearer ' + jwt } });
+    // The JWT already has this session's key thumbprint baked into its
+    // cnf.jkt claim from issuance (see /auth/callback + server/app.py) — load
+    // the matching keypair back out of IndexedDB so proofs verify against it.
+    await initDPoP();
+
+    // Use apiFetch so the DPoP proof is attached.
+    const resp = await apiFetch('/me');
     if (!resp.ok) { clearToken(); showLogin(); return; }
 
     const me = await resp.json();
     document.getElementById('me-username').textContent = '@' + (me.username || '?');
-
-    // Register the DPoP public JWK with the server so subsequent API calls
-    // can be verified.  Non-fatal if it fails (server still accepts the JWT).
-    if (_dpopPublicJwk) {
-      try {
-        await fetch('/auth/register-dpop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt },
-          body: JSON.stringify({ jwk: _dpopPublicJwk }),
-        });
-      } catch (_) { /* best-effort */ }
-    }
 
     showApp();
     _wsActive = true;
@@ -915,9 +914,9 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paused: !_requestsPaused }),
     });
-    if (!resp.ok) {
-      try { const d = await resp.json(); if (d) renderQueue(d); } catch {}
-    }
+    // Apply the fresh state directly rather than waiting on the next WS
+    // broadcast — keeps the button in sync even if broadcasts are delayed.
+    try { renderQueue(await resp.json()); } catch {}
   }
 
   init();

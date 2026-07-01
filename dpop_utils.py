@@ -10,9 +10,12 @@ Channel A — Streamer PC → Cloudflare Worker
   in the 'DPoP' request header.
 
 Channel B — Mod browser → Streamer PC
-  Each mod session generates an ephemeral keypair in the browser.
-  The public JWK is registered with the streamer server at /auth/register-dpop time.
-  verify_proof() validates incoming mod DPoP proofs on the server side.
+  Each mod session generates an ephemeral keypair in the browser and submits
+  the public JWK to /auth/token at login time.  The server computes the JWK
+  thumbprint (RFC 7638) and embeds it in the issued JWT as a cnf.jkt claim
+  (RFC 9449 §6.1) — the token is self-contained proof of what key it's bound
+  to, rather than relying on a separate mutable server-side registry.
+  verify_proof() validates incoming mod DPoP proofs against that thumbprint.
 """
 
 from __future__ import annotations
@@ -130,7 +133,7 @@ def verify_proof(
     proof: str,
     method: str,
     url: str,
-    stored_jwk: dict,
+    expected_jkt: str,
     access_token: str = "",
 ) -> bool:
     """
@@ -141,7 +144,8 @@ def verify_proof(
     proof        The raw 'DPoP' header value
     method       HTTP method of the request the proof accompanies
     url          Full request URL (query string stripped internally)
-    stored_jwk   The JWK the mod registered at /auth/register-dpop time
+    expected_jkt The JWK thumbprint from the caller's JWT cnf.jkt claim —
+                 the proof's key must hash to this value.
     access_token If provided, the 'ath' claim is verified against it
     """
     try:
@@ -159,8 +163,8 @@ def verify_proof(
         if not proof_jwk:
             return False
 
-        # Key binding: proof must use the registered keypair
-        if jwk_thumbprint(proof_jwk) != jwk_thumbprint(stored_jwk):
+        # Key binding: proof must use the keypair bound into the token's cnf.jkt
+        if jwk_thumbprint(proof_jwk) != expected_jkt:
             return False
 
         # Signature verification: convert JWA P1363 (raw r||s) → DER for cryptography

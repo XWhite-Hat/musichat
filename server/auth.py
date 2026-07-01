@@ -11,7 +11,8 @@ Flow
    to verify the visitor is actually a listed mod or the broadcaster
 6. Issues a short-lived JWT for subsequent API calls
 
-The JWT contains: {"sub": username, "exp": <unix ts>}
+The JWT contains: {"sub": username, "exp": <unix ts>, "iat": <unix ts>,
+"cnf": {"jkt": <DPoP key thumbprint>}}
 
 Note: the mod panel uses Implicit Grant (response_type=token) because it is a
 browser-only flow with no server-side component — the token lands in the fragment
@@ -23,7 +24,6 @@ and a user-supplied client_secret stored in DATA_DIR/.env.
 
 from __future__ import annotations
 
-import logging
 import secrets
 import time
 from typing import Optional
@@ -31,41 +31,18 @@ from typing import Optional
 import jwt
 import requests
 
-_log = logging.getLogger(__name__)
-
 TWITCH_AUTH_URL = "https://id.twitch.tv/oauth2/authorize"
 TWITCH_API = "https://api.twitch.tv/helix"
 
 _OAUTH_STATE_STORE: dict[str, float] = {}  # state → created_at
 STATE_TTL = 300  # 5 minutes
 
-# ── Mod DPoP JWK registry (Channel B) ────────────────────────────────────────
-# Maps username → public JWK registered at /auth/register-dpop time.
-# In-memory only: cleared on server restart (mods re-authenticate naturally).
-
-_MOD_DPOP_KEYS: dict[str, dict] = {}
-
-# DPoP is optional for 60 s after startup so existing mod tabs can re-register
-# their keypair after an app restart without hard-failing immediately.
-_DPOP_GRACE_UNTIL: float = time.monotonic() + 60
-_log.warning(
-    "DPoP grace window active for 60 s — mod panel requests without a registered "
-    "keypair will be accepted until %.0f (monotonic)",
-    _DPOP_GRACE_UNTIL,
-)
-
-
-def dpop_grace_active() -> bool:
-    """True while in the post-startup grace window — DPoP required once it expires."""
-    return time.monotonic() < _DPOP_GRACE_UNTIL
-
-
-def register_mod_dpop_jwk(username: str, jwk: dict) -> None:
-    _MOD_DPOP_KEYS[username] = jwk
-
-
-def get_mod_dpop_jwk(username: str) -> Optional[dict]:
-    return _MOD_DPOP_KEYS.get(username)
+# ── Mod DPoP key binding (Channel B) ──────────────────────────────────────────
+# The mod's JWK thumbprint is embedded in the JWT itself (cnf.jkt, RFC 9449
+# §6.1) at issuance time — see issue_jwt().  There is no separate server-side
+# registry: each token is self-contained proof of which key it's bound to, so
+# concurrent sessions for the same username (two tabs, two devices) don't
+# clobber each other the way a username-keyed store would.
 
 
 _STATE_STORE_CAP = 500  # max concurrent in-flight OAuth flows
@@ -677,20 +654,26 @@ def check_reward_exists(
         return True  # network error → assume OK
 
 
-def issue_jwt(username: str, secret: str, expiry_minutes: int = 120) -> str:
+def issue_jwt(
+    username: str, secret: str, expiry_minutes: int = 120, jkt: Optional[str] = None
+) -> str:
     payload = {
         "sub": username,
         "exp": int(time.time()) + expiry_minutes * 60,
         "iat": int(time.time()),
     }
+    if jkt:
+        # RFC 9449 §6.1 confirmation claim — binds this token to the mod's
+        # DPoP keypair so a bare stolen bearer token can't be replayed from
+        # a different machine without also holding the private key.
+        payload["cnf"] = {"jkt": jkt}
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def verify_jwt(token: str, secret: str) -> Optional[str]:
-    """Returns the username on success, None on failure."""
+def verify_jwt(token: str, secret: str) -> Optional[dict]:
+    """Returns the decoded payload (sub, exp, iat, optional cnf.jkt) on success, None on failure."""
     try:
-        payload = jwt.decode(token, secret, algorithms=["HS256"])
-        return payload.get("sub")
+        return jwt.decode(token, secret, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:

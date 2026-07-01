@@ -31,11 +31,9 @@ from config import AppConfig
 from server.auth import (
     build_twitch_auth_url,
     generate_oauth_state,
-    get_mod_dpop_jwk,
     get_twitch_user,
     is_mod_or_broadcaster,
     issue_jwt,
-    register_mod_dpop_jwk,
     validate_oauth_state,
     verify_jwt,
 )
@@ -217,6 +215,11 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
     #
     # Security: all user-visible messages use textContent not innerHTML to prevent
     # any Twitch-supplied error strings from being interpreted as HTML.
+    #
+    # DPoP: a fresh keypair is generated here and persisted to IndexedDB
+    # (dpop.js) before /auth/token is called, so the server can bind its
+    # thumbprint into the issued JWT (cnf.jkt).  The mod panel loads this same
+    # keypair back out of IndexedDB after the redirect to '/' — see dpop.js.
     _MOD_CALLBACK_HTML = """\
 <!DOCTYPE html>
 <html>
@@ -231,6 +234,7 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
 </head>
 <body>
 <div id="msg">Completing sign-in…</div>
+<script src="/static/dpop.js"></script>
 <script>
   const msg = document.getElementById('msg');
 
@@ -246,7 +250,15 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
     msg.style.color = '#ff4444';
   }
 
-  function postToken(payload) {
+  async function postToken(payload) {
+    try {
+      const keyPair = await dpopGenerateKeyPair();
+      await dpopSaveKeyPair(keyPair);
+      payload.jwk = await dpopExportPublicJwk(keyPair);
+    } catch (e) {
+      fail('Could not create a signing key for this session: ' + e);
+      return;
+    }
     fetch('/auth/token', {
       method:  'POST',
       headers: {'Content-Type': 'application/json'},
@@ -332,11 +344,22 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
         state    = (body.get("state") or "").strip()
         mod_code = (body.get("mod_code") or "").strip()
         token    = (body.get("token") or "").strip()
+        jwk      = body.get("jwk")
 
         if not state:
             return JSONResponse({"error": "missing_state"}, status_code=400)
         if not validate_oauth_state(state):
             return JSONResponse({"error": "invalid_state"}, status_code=400)
+
+        # The mod's DPoP public key must be supplied at login time — its
+        # thumbprint gets embedded in the JWT (cnf.jkt) so every subsequent
+        # API call can be bound to this specific browser keypair.
+        if (not isinstance(jwk, dict)
+                or jwk.get("kty") != "EC"
+                or jwk.get("crv") != "P-256"
+                or not isinstance(jwk.get("x"), str)
+                or not isinstance(jwk.get("y"), str)):
+            return JSONResponse({"error": "missing_or_invalid_jwk"}, status_code=400)
 
         loop = _asyncio.get_running_loop()
 
@@ -394,8 +417,12 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
         if not authorized:
             return JSONResponse({"error": "not_a_moderator"}, status_code=403)
 
+        from dpop_utils import jwk_thumbprint
+        jkt = jwk_thumbprint(
+            {"kty": jwk["kty"], "crv": jwk["crv"], "x": jwk["x"], "y": jwk["y"]}
+        )
         jwt_token = issue_jwt(
-            username, cfg.server.jwt_secret, cfg.server.jwt_expiry_minutes
+            username, cfg.server.jwt_secret, cfg.server.jwt_expiry_minutes, jkt=jkt
         )
         return JSONResponse({"jwt": jwt_token, "username": username})
 
@@ -414,71 +441,40 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
     async def whoami(request: Request):
         auth = request.headers.get("Authorization", "")
         token = auth.removeprefix("Bearer ").strip()
-        username = verify_jwt(token, cfg.server.jwt_secret)
-        if not username:
+        payload = verify_jwt(token, cfg.server.jwt_secret)
+        if not payload:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        if not _verify_dpop(request, username):
+        if not _verify_dpop(request, payload):
             return JSONResponse({"error": "invalid_dpop"}, status_code=401)
-        return {"username": username}
-
-    @app.post("/auth/register-dpop")
-    async def register_dpop(request: Request):
-        """
-        Register the mod's DPoP public JWK for Channel B proof verification.
-
-        Called by the mod panel JS after login completes, before the first API call.
-        The JWK is stored in-memory (process lifetime); mods re-register on
-        reconnect after a server restart.
-        """
-        auth = request.headers.get("Authorization", "")
-        token = auth.removeprefix("Bearer ").strip()
-        username = verify_jwt(token, cfg.server.jwt_secret)
-        if not username:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "invalid_body"}, status_code=400)
-
-        jwk = body.get("jwk")
-        if (not isinstance(jwk, dict)
-                or jwk.get("kty") != "EC"
-                or jwk.get("crv") != "P-256"
-                or not isinstance(jwk.get("x"), str)
-                or not isinstance(jwk.get("y"), str)):
-            return JSONResponse({"error": "invalid_jwk"}, status_code=400)
-
-        # Store only the required JWK fields
-        register_mod_dpop_jwk(username, {"kty": jwk["kty"], "crv": jwk["crv"], "x": jwk["x"], "y": jwk["y"]})
-        return {"ok": True}
+        return {"username": payload["sub"]}
 
     # ── Search ──────────────────────────────────────────────────────────────────
     # Mod-facing search — runs yt-dlp in an executor so the event loop isn't
     # blocked.  Returns lightweight result cards; enqueue resolves the full URL.
 
-    def _verify_dpop(request: Request, username: str) -> bool:
-        """Verify DPoP proof if this user has a registered JWK (Channel B)."""
-        from server.auth import dpop_grace_active
-        jwk = get_mod_dpop_jwk(username)
-        if jwk is None:
-            return dpop_grace_active()  # allow only during startup grace window
+    def _verify_dpop(request: Request, payload: dict) -> bool:
+        """Verify the DPoP proof against the key thumbprint bound into this
+        token's cnf.jkt claim (RFC 9449 §6.1) — no separate registry lookup."""
+        jkt = (payload.get("cnf") or {}).get("jkt")
+        if not jkt:
+            return False  # token predates DPoP binding — force re-login
         proof = request.headers.get("DPoP", "")
         if not proof:
             return False
         from dpop_utils import verify_proof
         htu = str(request.url).split("?")[0]
-        return verify_proof(proof, request.method, htu, jwk)
+        return verify_proof(proof, request.method, htu, jkt)
 
     @app.get("/search")
     async def search_tracks(q: str, request: Request):
         import asyncio as _asyncio
         auth = request.headers.get("Authorization", "")
         token = auth.removeprefix("Bearer ").strip()
-        username = verify_jwt(token, cfg.server.jwt_secret)
-        if not username:
+        payload = verify_jwt(token, cfg.server.jwt_secret)
+        if not payload:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        if not _verify_dpop(request, username):
+        username = payload["sub"]
+        if not _verify_dpop(request, payload):
             return JSONResponse({"error": "invalid_dpop"}, status_code=401)
         # 20 searches per minute per user
         if not queue_routes.check_rate(username, 20, 60):
@@ -507,10 +503,11 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
         from player.queue_manager import RequestOrigin
         auth = request.headers.get("Authorization", "")
         token = auth.removeprefix("Bearer ").strip()
-        username = verify_jwt(token, cfg.server.jwt_secret)
-        if not username:
+        payload = verify_jwt(token, cfg.server.jwt_secret)
+        if not payload:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        if not _verify_dpop(request, username):
+        username = payload["sub"]
+        if not _verify_dpop(request, payload):
             return JSONResponse({"error": "invalid_dpop"}, status_code=401)
         # 10 enqueues per minute per user
         if not queue_routes.check_rate(username, 10, 60):
