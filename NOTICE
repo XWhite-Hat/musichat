@@ -1,0 +1,318 @@
+----------------------------------------------------------------------
+THIRD-PARTY COMPONENTS AND LICENSING ATTRIBUTIONS
+----------------------------------------------------------------------
+
+MusicHat is copyright (c) 2026 Xwhitehat and released under the MIT
+License.  It uses third-party libraries; their licenses are attributed
+below.
+
+
+════════════════════════════════════════════════════════════════════
+ GNU LESSER GENERAL PUBLIC LICENSE v3 (LGPLv3)
+════════════════════════════════════════════════════════════════════
+
+  PySide6 — The Qt Company
+  shiboken6 — The Qt Company
+
+  PySide6 and the underlying Qt libraries are distributed under the
+  GNU Lesser General Public License version 3 (LGPLv3).
+
+  LGPL COMPLIANCE STATEMENT
+  ─────────────────────────
+  MusicHat does NOT bundle PySide6 inside its binary.  PySide6 is
+  downloaded separately and stored in the user's chosen data folder
+  (data_dir/pyside6/) at first run.  The application loads PySide6
+  as a shared library from that location at runtime.
+
+  This design satisfies the LGPLv3 requirements:
+
+    (a) The user retains the right to replace PySide6 with a
+        modified or updated version.  To do so, remove or replace
+        the contents of the  pyside6/  subfolder inside your MusicHat
+        data folder and restart the app.  Any compatible PySide6
+        build will be loaded.
+
+    (b) The application is not statically linked against PySide6.
+        No object code from PySide6 is compiled into the MusicHat
+        binary.
+
+    (c) The complete corresponding source code for PySide6 and the
+        Qt libraries is available at:
+          https://code.qt.io/cgit/
+          https://download.qt.io/official_releases/QtForPython/
+
+  The full text of the LGPLv3 is available at:
+    https://www.gnu.org/licenses/lgpl-3.0.html
+
+
+════════════════════════════════════════════════════════════════════
+ MOZILLA PUBLIC LICENSE 2.0 (MPL-2.0)
+════════════════════════════════════════════════════════════════════
+
+  certifi — Kenneth Reitz, Certifi contributors
+    https://github.com/certifi/python-certifi
+
+  certifi bundles the Mozilla CA Certificate bundle (cacert.pem),
+  which is derived from Mozilla's certificate store and distributed
+  under the Mozilla Public License 2.0.  The MPL-2.0 is a file-level
+  weak-copyleft licence; it applies only to the covered source files
+  (not to MusicHat itself).  The unmodified source is available from
+  PyPI: https://pypi.org/project/certifi/
+
+  Full text: https://www.mozilla.org/en-US/MPL/2.0/
+
+
+════════════════════════════════════════════════════════════════════
+ MIT LICENSE
+════════════════════════════════════════════════════════════════════
+
+  customtkinter — Tom Schimansky
+    https://github.com/TomSchimansky/CustomTkinter
+    Note: PyPI classifier incorrectly lists CC0-1.0; the actual
+    license in the dist-info LICENSE file is MIT (Copyright Tom Schimansky).
+
+  darkdetect — Alberto Sottile
+    https://github.com/albertosottile/darkdetect
+
+  twitchio — PythonistaGuild
+    https://github.com/TwitchIO/TwitchIO
+    Copyright (c) 2017 - Present PythonistaGuild
+
+  fastapi — Sebastián Ramírez (tiangolo)
+    https://github.com/fastapi/fastapi
+
+  PyJWT — José Padilla
+    https://github.com/jpadilla/pyjwt
+
+  keyring — Jason R. Coombs
+    https://github.com/jaraco/keyring
+
+
+  sounddevice — Matthias Geier
+    https://github.com/spatialaudio/python-sounddevice
+
+  starlette — Encode OSS
+    https://github.com/encode/starlette
+
+  pydantic — Samuel Colvin
+    https://github.com/pydantic/pydantic
+
+  anyio — Alex Grönholm
+    https://github.com/agronholm/anyio
+
+  h11 — Nathaniel J. Smith
+    https://github.com/python-hyper/h11
+
+  httptools — MagicStack Inc.
+    https://github.com/MagicStack/httptools
+
+  pyparsing — Paul T. McGuire
+    https://github.com/pyparsing/pyparsing
+
+
+════════════════════════════════════════════════════════════════════
+ BSD 2-CLAUSE LICENSE
+════════════════════════════════════════════════════════════════════
+
+  htmx — Carson Gross
+    https://htmx.org/  |  https://github.com/bigskysoftware/htmx
+    Copyright (c) 2020, Big Sky Software
+    Version 1.9.10, embedded at server/static/htmx.min.js
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above
+       copyright notice, this list of conditions and the following
+       disclaimer in the documentation and/or other materials provided
+       with the distribution.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+  COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+  STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+  OF THE POSSIBILITY OF SUCH DAMAGE.
+
+  Full text: https://opensource.org/licenses/BSD-2-Clause
+
+
+════════════════════════════════════════════════════════════════════
+ APACHE LICENSE 2.0 / BSD 3-CLAUSE (dual-licensed)
+════════════════════════════════════════════════════════════════════
+
+  cryptography — PyCA contributors
+    https://github.com/pyca/cryptography
+    Distributed under the Apache License 2.0 OR BSD 3-Clause licence.
+    Used transitively by keyring for OS credential-store access.
+
+
+════════════════════════════════════════════════════════════════════
+ GNU LESSER GENERAL PUBLIC LICENSE v2.1 (LGPLv2.1) — FFmpeg core
+════════════════════════════════════════════════════════════════════
+
+  FFmpeg — FFmpeg contributors
+    https://ffmpeg.org/
+
+  MusicHat is a Windows-only application.  The Windows binary ships a
+  custom PyAV wheel built against the BtbN FFmpeg 8.1 LGPL shared
+  build (--disable-libx264 --disable-libx265 --disable-gpl), stored
+  at vendor/av-17.1.0-cp314-cp314-win_amd64.whl.  The bundled FFmpeg
+  shared libraries are licensed LGPLv2.1 or later (the BtbN build
+  uses --enable-version3):
+
+    avcodec-62    — LGPLv2.1+
+    avformat-62   — LGPLv2.1+
+    avutil-60     — LGPLv2.1+
+    swresample-6  — LGPLv2.1+
+    swscale-9     — LGPLv2.1+
+    avfilter-11   — LGPLv2.1+
+    avdevice-62   — LGPLv2.1+
+
+  This wheel replaces the standard PyPI av distribution, which
+  bundles libx264 (GPL-2.0) and libx265 (GPL-2.0+) as hard PE
+  imports.  The vendor wheel carries none of those GPL components.
+
+  The complete corresponding FFmpeg source code is available at:
+    https://ffmpeg.org/download.html
+  The BtbN build scripts and patches are available at:
+    https://github.com/BtbN/FFmpeg-Builds
+
+  Full text of the LGPLv2.1:
+    https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+  av (PyAV) — PyAV contributors
+    https://github.com/PyAV-Org/PyAV
+    BSD 3-Clause licence (wrapper only; FFmpeg libraries covered above)
+
+
+════════════════════════════════════════════════════════════════════
+ BSD 3-CLAUSE LICENSE
+════════════════════════════════════════════════════════════════════
+
+  numpy — NumPy contributors
+    https://github.com/numpy/numpy
+
+  websockets — Aymeric Augustin
+    https://github.com/python-websockets/websockets
+
+  uvicorn — Encode OSS
+    https://github.com/encode/uvicorn
+
+  httpx — Encode OSS
+    https://github.com/encode/httpx
+
+
+════════════════════════════════════════════════════════════════════
+ APACHE LICENSE 2.0
+════════════════════════════════════════════════════════════════════
+
+  Apache 2.0 §4(d) requires all transitive Apache-licensed packages
+  to appear in this NOTICE when a NOTICE file is included.
+
+  requests — Kenneth Reitz
+    https://github.com/psf/requests
+
+  aiohttp — aio-libs contributors
+    https://github.com/aio-libs/aiohttp
+
+  aiosignal — aio-libs contributors (Nikolay Kim, Andrew Svetlov)
+    https://github.com/aio-libs/aiosignal
+
+  frozenlist — aio-libs contributors (Nikolay Kim, Andrew Svetlov)
+    https://github.com/aio-libs/frozenlist
+
+  multidict — aio-libs contributors (Andrew Svetlov)
+    https://github.com/aio-libs/multidict
+
+  yarl — aio-libs contributors
+    https://github.com/aio-libs/yarl
+
+  propcache — aio-libs contributors
+    https://github.com/aio-libs/propcache
+
+  python-multipart — Andrew Dunstan, Kludex
+    https://github.com/Kludex/python-multipart
+    Note: PyPI classifier lists MIT in error; the actual license is
+    Apache-2.0 — confirmed from the package's dist-info LICENSE file.
+
+  The full text of the Apache License 2.0 is available at:
+    https://www.apache.org/licenses/LICENSE-2.0
+
+
+════════════════════════════════════════════════════════════════════
+ HISTORICAL PERMISSION NOTICE AND DISCLAIMER (HPND)
+════════════════════════════════════════════════════════════════════
+
+  Pillow — Jeffrey A. Clark (Alex) and contributors
+    (derived from PIL, copyright © 1997–2011 Secret Labs AB,
+     copyright © 1995–2011 Fredrik Lundh)
+    https://github.com/python-pillow/Pillow
+
+  Pillow is distributed under the PIL Software License
+  (SPDX: HPND).  The full text is included in Pillow's distribution
+  and available at https://raw.githubusercontent.com/python-pillow/Pillow/main/LICENSE
+
+
+════════════════════════════════════════════════════════════════════
+ THE UNLICENSE (PUBLIC DOMAIN)
+════════════════════════════════════════════════════════════════════
+
+  yt-dlp — yt-dlp contributors
+    https://github.com/yt-dlp/yt-dlp
+    Dedicated to the public domain under The Unlicense.
+
+
+════════════════════════════════════════════════════════════════════
+ GNU GENERAL PUBLIC LICENSE v2+ WITH BOOTLOADER EXCEPTION
+════════════════════════════════════════════════════════════════════
+
+  PyInstaller — PyInstaller Development Team
+    https://github.com/pyinstaller/pyinstaller
+
+  PyInstaller is licensed under the GNU General Public License v2
+  or later (GPL-2.0+).  The PyInstaller bootloader — a small C stub
+  that unpacks and launches the application — is embedded in
+  musichat.exe at build time.
+
+  PyInstaller includes a special bootloader exception that explicitly
+  permits distributing the compiled output as a non-free binary:
+
+    "In addition to the permissions in the GNU General Public
+     License, the authors give you unlimited permission to link or
+     embed compiled bootloader and related files into combinations
+     with other programs, and to distribute those combinations
+     without any restriction coming from the use of PyInstaller."
+
+  This exception satisfies the GPL copyleft obligation for the
+  bootloader code.  MusicHat's own source code is not subject to the
+  GPL; the exception covers only the embedded bootloader.
+
+  Full GPL-2.0 text:  https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+  Exception text:     https://pyinstaller.org/en/stable/license.html
+
+
+════════════════════════════════════════════════════════════════════
+ PYTHON SOFTWARE FOUNDATION LICENSE (PSF-2.0)
+════════════════════════════════════════════════════════════════════
+
+  Python standard library (tkinter, hashlib, zipfile, urllib, etc.)
+    https://www.python.org/
+    Copyright © 2001–2026 Python Software Foundation.
+    Full licence: https://docs.python.org/3/license.html
+
+  aiohappyeyeballs — Python Software Foundation / aio-libs contributors
+    https://github.com/aio-libs/aiohappyeyeballs
+    Derived from CPython's asyncio happy-eyeballs implementation.
+
+----------------------------------------------------------------------

@@ -1,0 +1,201 @@
+###############################################################################
+# CI — Runs on every push and pull request.
+#
+# SECURITY MODEL
+# ──────────────
+# • All third-party actions are pinned to immutable commit SHAs.
+#   Tags are mutable (CVE-2025-30066 / TeamPCP vector) — SHAs are not.
+#
+# • To verify a SHA:
+#     gh api repos/<owner>/<repo>/git/refs/tags/<tag> --jq '.object.sha'
+#   or browse https://github.com/<owner>/<repo>/commit/<sha>
+#
+# • `pull_request_target` is intentionally ABSENT — it runs with write
+#   permissions and access to secrets, making it the primary OIDC-theft
+#   vector used by shai-hulud / TeamPCP.
+#
+# • Default GITHUB_TOKEN is read-only.  Individual jobs request only what
+#   they need via the `permissions:` key.
+#
+# SHA MAINTENANCE
+# ───────────────
+# Dependabot keeps these pinned SHAs current (see dependabot.yml).
+# After Dependabot bumps a SHA, verify the new commit before merging.
+###############################################################################
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: [main, develop]
+    # NOTE: pull_request (not pull_request_target) — forks run with
+    # read-only token and no access to repository secrets.
+
+# Minimum permissions at the workflow level — jobs opt-in to more.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # 1. Scan the workflows themselves for security issues (zizmor)
+  # ────────────────────────────────────────────────────────────────────────────
+  workflow-security:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Uncomment once Code Scanning Default Setup is enabled in repo settings:
+      # security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor
+        run: pip install zizmor==1.5.0 --no-deps --quiet
+
+      - name: Run zizmor
+        run: |
+          zizmor --format sarif . > zizmor.sarif 2>/dev/null || true
+          zizmor --format plain .
+      # Once Code Scanning Default Setup is enabled, uncomment this block to get
+      # zizmor findings in the Security tab alongside CodeQL:
+      #
+      # - name: Upload SARIF to Code Scanning
+      #   uses: github/codeql-action/upload-sarif@<SHA>  # pin before enabling
+      #   if: always()
+      #   with:
+      #     sarif_file: zizmor.sarif
+      #     category: zizmor
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 2. Audit Python dependencies for known CVEs
+  # ────────────────────────────────────────────────────────────────────────────
+  pip-audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Run pip-audit
+        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266  # v1.1.0
+        with:
+          inputs: requirements.txt
+          # Fail on any vulnerability with a fix available.
+          # Unfixable vulns are flagged but don't block CI (they get a
+          # separate SARIF upload for triage).
+          vulnerability-service: osv
+          summary: true
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 3. Dependency review — catch new vulnerable/license-violating deps on PRs
+  # ────────────────────────────────────────────────────────────────────────────
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    # Only runs on PRs — push events don't have a base to diff against.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        with:
+          fail-on-severity: moderate
+          deny-licenses: GPL-2.0, GPL-3.0, LGPL-2.0, LGPL-2.1, AGPL-3.0
+          comment-summary-in-pr: always
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 4. Static lint (ruff — fast, zero config)
+  # ────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff==0.8.6 --no-deps --quiet
+
+      - name: Lint
+        run: ruff check . --output-format=github
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 5. Verify TWITCH_APP_CLIENT_ID is NOT committed (repo safety check)
+  # ────────────────────────────────────────────────────────────────────────────
+  client-id-leak-check:
+    name: Client ID leak check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Confirm no client ID committed to source
+        run: |
+          # TWITCH_CLIENT_ID must never be committed — BYOI users use .env,
+          # proxied mode uses the Cloudflare Worker.
+          if grep -n 'TWITCH_APP_CLIENT_ID.*=.*"[a-z0-9]\{8,\}"' constants.py; then
+            echo "::error file=constants.py::A Twitch client ID is committed in constants.py!"
+            echo "::error::Remove it immediately. Use a .env file for BYOI development."
+            exit 1
+          fi
+          echo "OK: No client ID in source."
+
+      - name: Secret pattern scan (trufflehog)
+        # Skip on the very first push to a new repo (before SHA is all-zeros).
+        if: >-
+          github.event_name == 'pull_request' ||
+          (github.event_name == 'push' &&
+           github.event.before != '0000000000000000000000000000000000000000')
+        uses: trufflesecurity/trufflehog@f446421baf832d6356c42c1743d99abff52ff334  # v3.95.7
+        with:
+          path: ./
+          base: >-
+            ${{ github.event_name == 'pull_request'
+              && github.event.pull_request.base.sha
+              || github.event.before }}
+          head: HEAD
+          extra_args: --only-verified
+        continue-on-error: true   # advisory — trufflehog cloud is unreliable in CI

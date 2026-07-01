@@ -1,0 +1,15 @@
+# PyInstaller is installed separately because it ships platform-specific wheels
+# (not py3-none-any), so pip --hash on the CLI doesn't work — hashes must be
+# declared per-requirement in a file.
+#
+# Hash map:
+#   7fae06c... → pyinstaller-6.21.0-py3-none-win_amd64.whl
+#   327d132... → pyinstaller-6.21.0-py3-none-macosx_10_13_universal2.whl
+#   605169... → pyinstaller-6.21.0-py3-none-manylinux2014_x86_64.whl
+#
+# To update: bump the version, run `pip download pyinstaller==X.Y.Z` for each
+# platform, then replace the hashes with the output of `sha256sum *.whl`.
+pyinstaller==6.21.0 \
+    --hash=sha256:7fae06c494ce0ebfe6bd3055c0e409def884f63af2e3705d06bd431ad9237fc7 \
+    --hash=sha256:327d132389f37912609e01be62810cf96b5aa95b613903e4b8692e0d12fb0eda \
+    --hash=sha256:605169523a6b5ace39f13dfbff21add9f2bc43df99c7daf9394fefb2c45e8b6f

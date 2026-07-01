@@ -1,0 +1,40 @@
+version: 2
+
+updates:
+  # Python dependencies — weekly, patch/minor grouped, major separate.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 10
+    groups:
+      patch-updates:
+        update-types: [patch]
+      minor-updates:
+        update-types: [minor]
+    commit-message:
+      prefix: "deps(pip)"
+    ignore:
+      # twitchio major versions have broken APIs — update manually.
+      - dependency-name: twitchio
+        update-types: ["version-update:semver-major"]
+      # pydantic-core is an internal implementation detail of pydantic.
+      # Its version is dictated by pydantic itself — updating it independently
+      # breaks the app.  Let pydantic own this; regenerate the lockfile when
+      # pydantic bumps.
+      - dependency-name: pydantic-core
+
+  # GitHub Actions — weekly, SHA-pinned SHAs kept current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"

@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Spectrogram Overlay</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:transparent; }
+  canvas { display:block; width:100%; height:100%; will-change:transform; transform:translateZ(0); }
+  #status {
+    position:fixed; bottom:4px; right:8px;
+    font:11px/1 monospace; color:rgba(0,255,65,0.35);
+    pointer-events:none; user-select:none;
+    display:none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="status">connecting…</div>
+<script>
+'use strict';
+
+// ── Bootstrap ──────────────────────────────────────────────────────────────────
+const PARAMS = new URLSearchParams(window.location.search);
+const PRESET  = PARAMS.get('preset') || 'Main';
+const HOST    = window.location.host;   // e.g. localhost:8765
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d', { desynchronized: true });
+const status = document.getElementById('status');
+
+// ── Physics constants — mirror src/ui/spectrogram_widget.py ───────────────────
+const GRAVITY_BASE   = 0.008;   // downward accel per 60-fps frame
+const SILENCE_FRAMES = 4;       // frames of no WS data before bars fall freely
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let cfg = null;
+
+// Raw targets from the WebSocket (0-1, set each WS frame)
+let targets       = [];
+// Physics-simulated display values
+let displayBars   = [];
+let barVels       = [];
+// Peak-hold state
+let displayPeaks  = [];
+let peakCdns      = [];   // countdown: frames until decay starts
+// Waterfall rows — newest first
+let waterfallRows = [];
+
+let framesSincePush = SILENCE_FRAMES + 1;   // start "silent"
+let lastFrameTs     = 0;
+let gravity         = GRAVITY_BASE;          // adjusted when cfg.fps_target changes
+
+// ── Canvas resize ─────────────────────────────────────────────────────────────
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ── Background ────────────────────────────────────────────────────────────────
+function applyBackground() {
+  if (!cfg) return;
+  const a = cfg.background_alpha / 255;
+  const h = cfg.background_color;
+  const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+  document.body.style.background = `rgba(${r},${g},${b},${a})`;
+}
+
+// ── Array init ────────────────────────────────────────────────────────────────
+function initArrays(n) {
+  targets      = new Float32Array(n);
+  displayBars  = new Float32Array(n);
+  barVels      = new Float32Array(n);
+  displayPeaks = new Float32Array(n);
+  peakCdns     = new Int32Array(n);
+  waterfallRows = [];
+}
+
+function applyConfig(newCfg) {
+  const oldN = cfg ? cfg.bar_count : 0;
+  cfg = newCfg;
+  applyBackground();
+  gravity = GRAVITY_BASE * (60 / Math.max(1, cfg.fps_target));
+  if (oldN !== cfg.bar_count) {
+    initArrays(cfg.bar_count);
+  }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+let ws = null;
+let reconnDelay = 500;
+
+function connect() {
+  const url = `ws://${HOST}/spectrogram/ws/${encodeURIComponent(PRESET)}`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    status.textContent = PRESET;
+    reconnDelay = 500;
+  };
+
+  ws.onclose = (e) => {
+    // Clear peak holds immediately — they should not linger while disconnected.
+    displayPeaks.fill(0);
+    peakCdns.fill(0);
+
+    if (e.code === 1008) {
+      // Preset was deleted — don't hammer the server
+      status.textContent = `preset '${PRESET}' not found`;
+      setTimeout(connect, 8000);
+    } else {
+      status.textContent = 'reconnecting…';
+      setTimeout(connect, reconnDelay);
+      reconnDelay = Math.min(reconnDelay * 2, 8000);
+    }
+  };
+
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.ping) return;
+      if (msg.config) {
+        applyConfig(msg.config);
+        return;
+      }
+      if (msg.bars && cfg) {
+        const src = msg.bars;
+        const n   = cfg.bar_count;
+        if (targets.length !== n) initArrays(n);
+        // Copy (server may send a different length during live bar_count change)
+        if (src.length === n) {
+          for (let i = 0; i < n; i++) targets[i] = src[i];
+        } else {
+          // Linear resample
+          for (let i = 0; i < n; i++) {
+            const t = (i / (n - 1)) * (src.length - 1);
+            const lo = Math.floor(t), hi = Math.min(lo + 1, src.length - 1);
+            targets[i] = src[lo] + (t - lo) * (src[hi] - src[lo]);
+          }
+        }
+        framesSincePush = 0;
+      }
+    } catch (_) {}
+  };
+}
+
+// ── Physics — mirrors SpectrogramWidget._tick() ───────────────────────────────
+function physicsUpdate() {
+  framesSincePush++;
+  const n       = displayBars.length;
+  const useTgts = framesSincePush <= SILENCE_FRAMES;
+
+  for (let i = 0; i < n; i++) {
+    const tgt = useTgts ? targets[i] : 0;
+
+    if (tgt >= displayBars[i]) {
+      // Snap up (no velocity delay for rising edges — matches Qt snap behaviour)
+      displayBars[i] = tgt;
+      barVels[i]     = 0;
+    } else {
+      // Gravity fall
+      barVels[i]    -= gravity;
+      displayBars[i] += barVels[i];
+    }
+
+    // Floor clamp
+    if (displayBars[i] <= 0) { displayBars[i] = 0; barVels[i] = 0; }
+    if (displayBars[i] >  1)   displayBars[i] = 1;
+  }
+
+  // Peak hold — same countdown logic as Qt
+  if (cfg && cfg.peak_hold) {
+    for (let i = 0; i < n; i++) {
+      if (displayBars[i] >= displayPeaks[i]) {
+        displayPeaks[i] = displayBars[i];
+        peakCdns[i]     = cfg.peak_hold_frames;
+      } else {
+        if (peakCdns[i] > 0) {
+          peakCdns[i]--;
+        } else {
+          displayPeaks[i] = Math.max(0, displayPeaks[i] - cfg.peak_decay_rate);
+        }
+      }
+    }
+  }
+}
+
+// ── Ouroboros blending — mirrors _draw_bars_arc() value blend ─────────────────
+// Returns [blendedBars, blendedPeaks] without mutating originals.
+function applyOuroboros(bBars, bPeaks) {
+  if (!cfg || !cfg.camber_asymmetric || cfg.camber_degrees < 359.5) {
+    return [bBars, bPeaks];
+  }
+  const n = bBars.length;
+  if (n < 4) return [bBars, bPeaks];
+
+  const bars  = bBars.slice();
+  const peaks = bPeaks.slice();
+  const blend = Math.max(1, Math.floor(n / 16));
+  const avgB  = (bars[0]  + bars[n-1])  / 2;
+  const avgP  = (peaks[0] + peaks[n-1]) / 2;
+
+  for (let k = 0; k < blend; k++) {
+    const t = k / blend;
+    bars[k]       = avgB + t * (bars[k]       - avgB);
+    bars[n-1-k]   = avgB + t * (bars[n-1-k]   - avgB);
+    peaks[k]      = avgP + t * (peaks[k]       - avgP);
+    peaks[n-1-k]  = avgP + t * (peaks[n-1-k]  - avgP);
+  }
+  return [bars, peaks];
+}
+
+// ── Colour helpers ────────────────────────────────────────────────────────────
+const PALETTE = {
+  matrix: ['#003300','#00cc33','#00ff41'],
+  fire:   ['#1a0000','#ff4400','#ffff00'],
+  cyan:   ['#001a1a','#00cccc','#00ffff'],
+  purple: ['#0d0011','#9900ff','#ff44ff'],
+  sunset: ['#1a0000','#ff6600','#ffee44'],
+};
+
+function hexRgb(hex) {
+  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+}
+function lerp(a,b,t) { return a + (b-a)*t; }
+
+function barColorAt(t) {
+  t = Math.max(0, Math.min(1, t));
+  // Always use the colour fields — the Python widget does the same.
+  // color_preset is a UI label only; the actual colours live in color_start/mid/end.
+  const s = cfg.color_start, m = cfg.color_mid, e = cfg.color_end;
+  const [r1,g1,b1] = hexRgb(s), [r2,g2,b2] = hexRgb(m), [r3,g3,b3] = hexRgb(e);
+  let r,g,b;
+  if (t <= 0.5) { const tt=t*2; r=lerp(r1,r2,tt); g=lerp(g1,g2,tt); b=lerp(b1,b2,tt); }
+  else          { const tt=(t-0.5)*2; r=lerp(r2,r3,tt); g=lerp(g2,g3,tt); b=lerp(b2,b3,tt); }
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+
+// Full-height vertical gradient for flat mode (reused across all bars in frame)
+// Matches Qt: gradient spans from base_y (low) to y=0 (high), so shorter bars
+// appear less intense (only the low-end of the gradient is reached).
+let _flatGrad = null;
+let _flatGradH = -1;
+
+function flatGradient(baseY) {
+  // Rebuild when baseY changes OR when the frame loop nulled it after a config update.
+  if (!_flatGrad || _flatGradH !== baseY) {
+    _flatGrad  = ctx.createLinearGradient(0, baseY, 0, 0);
+    _flatGrad.addColorStop(0,   barColorAt(0));
+    _flatGrad.addColorStop(0.5, barColorAt(0.5));
+    _flatGrad.addColorStop(1,   barColorAt(1));
+    _flatGradH = baseY;
+  }
+  return _flatGrad;
+}
+
+function peakColor() {
+  const c = barColorAt(1);
+  return c;   // Qt uses color_end at alpha 200; pure alpha control via globalAlpha
+}
+
+// ── Flat bars — matches _draw_bars_flat() ─────────────────────────────────────
+function drawBarsFlat(bars, peaks) {
+  const W = canvas.width, H = canvas.height;
+  const n   = bars.length;
+  if (n === 0) return;
+  const gap  = cfg.bar_gap;
+  const barW = Math.max(1, (W - gap * (n - 1)) / n);
+  const dbl  = cfg.double_sided;
+  const baseY = dbl ? H / 2 : H;
+  const maxH  = dbl ? H / 2 - 2 : H - 2;
+
+  ctx.fillStyle = flatGradient(baseY);
+
+  for (let i = 0; i < n; i++) {
+    const barH = Math.max(bars[i] * maxH, cfg.bar_min_height);
+    const x    = i * (barW + gap);
+    ctx.fillRect(x, baseY - barH, barW, barH);
+    if (dbl) ctx.fillRect(x, baseY, barW, barH);
+  }
+
+  // Peak hold
+  if (cfg.peak_hold) {
+    ctx.fillStyle  = peakColor();
+    ctx.globalAlpha = 0.78;
+    for (let i = 0; i < n; i++) {
+      if (peaks[i] > 0.01) {
+        const ph = Math.max(peaks[i] * maxH, cfg.bar_min_height);
+        const x  = i * (barW + gap);
+        ctx.fillRect(x, baseY - ph - 2, barW, 2);
+        if (dbl) ctx.fillRect(x, baseY + ph, barW, 2);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ── Partial arc bars — matches _draw_arc_partial() ───────────────────────────
+// Arc center is BELOW the widget; bars extend radially UPWARD (outward).
+function drawBarsArcPartial(bars, peaks, arcDeg) {
+  const W = canvas.width, H = canvas.height;
+  const n = bars.length;
+  if (n === 0) return;
+
+  const halfRad = arcDeg * Math.PI / 360;  // half-angle in radians
+  const sinH    = Math.max(1e-6, Math.sin(halfRad));
+  const cosH    = Math.cos(halfRad);
+
+  // Qt formula: chord ≈ w * 0.96, radius derived from that chord + half-arc-angle
+  const R      = Math.min((W * 0.48) / sinH, 5000);
+  const cx     = W / 2;
+  const cy     = H + R * cosH;          // centre below bottom edge (Qt layout)
+  const arcTopY = cy - R;               // y of topmost arc point (centre bar base)
+  const maxBarH = Math.max(10, arcTopY - 4);
+
+  const gapDeg    = arcDeg / n;
+  const barWDeg   = Math.max(0.1, gapDeg - 0.5);
+  const barWPx    = Math.max(1, R * barWDeg * Math.PI / 180);
+  const startDeg  = -arcDeg / 2;
+
+  // Gradient in arc-local space — base at -R, max tip at -(R+maxBarH)
+  const grad = ctx.createLinearGradient(0, -R, 0, -(R + maxBarH));
+  grad.addColorStop(0,   barColorAt(0));
+  grad.addColorStop(0.5, barColorAt(0.5));
+  grad.addColorStop(1,   barColorAt(1));
+
+  const pkCol  = peakColor();
+  const dbl    = cfg.double_sided;
+
+  for (let i = 0; i < n; i++) {
+    const thetaDeg = startDeg + (i + 0.5) * gapDeg;
+    const thetaRad = thetaDeg * Math.PI / 180;
+    const barH = Math.max(bars[i] * maxBarH, cfg.bar_min_height);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(thetaRad);
+    ctx.fillStyle = grad;
+    ctx.fillRect(-barWPx / 2, -(R + barH), barWPx, barH);
+    if (dbl) ctx.fillRect(-barWPx / 2, -R, barWPx, barH);
+    ctx.restore();
+
+    if (cfg.peak_hold && peaks[i] > 0.01) {
+      const ph   = Math.max(peaks[i] * maxBarH, cfg.bar_min_height);
+      const pkW  = Math.max(1, (R + ph) * barWDeg * Math.PI / 180);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(thetaRad);
+      ctx.fillStyle   = pkCol;
+      ctx.globalAlpha = 0.78;
+      ctx.fillRect(-pkW / 2, -(R + ph + 2), pkW, 2);
+      if (dbl) ctx.fillRect(-pkW / 2, -(R - ph), pkW, 2);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// ── Full-circle bars — matches _draw_arc_circle() ────────────────────────────
+function drawBarsCircle(bars, peaks) {
+  const W = canvas.width, H = canvas.height;
+  const n = bars.length;
+  if (n === 0) return;
+
+  const margin  = 6;
+  const R_outer = Math.min(W, H) / 2 - margin;
+  const dbl     = cfg.double_sided;
+
+  let R_inner, R_base, maxBarH;
+  if (dbl) {
+    R_inner  = R_outer * 0.35;
+    R_base   = (R_inner + R_outer) / 2;
+    maxBarH  = (R_outer - R_inner) / 2;
+  } else {
+    R_inner  = R_outer * 0.40;
+    R_base   = R_inner;
+    maxBarH  = R_outer - R_inner;
+  }
+
+  const cx        = W / 2, cy = H / 2;
+  const degPerBar = 360 / n;
+  const barWDeg   = Math.max(0.1, degPerBar * 0.85);
+  const barWPx    = Math.max(1, R_base * barWDeg * Math.PI / 180);
+
+  // Radial gradient in local space — base at -R_base, max tip at -(R_base+maxBarH)
+  const grad = ctx.createLinearGradient(0, -R_base, 0, -(R_base + maxBarH));
+  grad.addColorStop(0,   barColorAt(0));
+  grad.addColorStop(0.5, barColorAt(0.5));
+  grad.addColorStop(1,   barColorAt(1));
+
+  const pkCol = peakColor();
+
+  for (let i = 0; i < n; i++) {
+    // Start at 12 o'clock (-90°), rotate clockwise — matches Qt θ = i*360/n - 90
+    const thetaRad = (i * degPerBar - 90) * Math.PI / 180;
+    const barH     = Math.max(bars[i] * maxBarH, cfg.bar_min_height);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(thetaRad);
+    ctx.fillStyle = grad;
+    ctx.fillRect(-barWPx / 2, -(R_base + barH), barWPx, barH);
+    if (dbl) ctx.fillRect(-barWPx / 2, -R_base, barWPx, barH);
+    ctx.restore();
+
+    if (cfg.peak_hold && peaks[i] > 0.01) {
+      const ph  = Math.max(peaks[i] * maxBarH, cfg.bar_min_height);
+      const pkW = Math.max(1, (R_base + ph) * barWDeg * Math.PI / 180);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(thetaRad);
+      ctx.fillStyle   = pkCol;
+      ctx.globalAlpha = 0.78;
+      ctx.fillRect(-pkW / 2, -(R_base + ph + 2), pkW, 2);
+      if (dbl) ctx.fillRect(-pkW / 2, -(R_base - ph), pkW, 2);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// ── Flat line ─────────────────────────────────────────────────────────────────
+function drawLineFlat(bars, peaks) {
+  const W = canvas.width, H = canvas.height;
+  const n = bars.length;
+  if (n < 2) return;
+  const dbl   = cfg.double_sided;
+  const baseY = dbl ? H / 2 : H;
+  const scaleH = dbl ? H / 2 - 2 : H - 2;
+
+  // Main line + fill
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * W;
+    const y = baseY - bars[i] * scaleH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  if (dbl) {
+    for (let i = n - 1; i >= 0; i--) {
+      ctx.lineTo((i / (n - 1)) * W, baseY + bars[i] * scaleH);
+    }
+    ctx.closePath();
+  } else {
+    ctx.lineTo(W, baseY);
+    ctx.lineTo(0, baseY);
+    ctx.closePath();
+  }
+
+  const fillGrad = ctx.createLinearGradient(0, baseY, 0, 0);
+  fillGrad.addColorStop(0, barColorAt(0) + '44');
+  fillGrad.addColorStop(1, barColorAt(1) + '00');
+  ctx.fillStyle = fillGrad;
+  ctx.fill();
+
+  // Stroke
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * W;
+    const y = baseY - bars[i] * scaleH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = barColorAt(0.75);
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+
+  if (dbl) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * W;
+      const y = baseY + bars[i] * scaleH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Peak hold line
+  if (cfg.peak_hold) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * W;
+      const y = baseY - peaks[i] * scaleH;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = peakColor();
+    ctx.lineWidth   = 1;
+    ctx.globalAlpha = 0.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ── Partial arc line ──────────────────────────────────────────────────────────
+function drawLineArcPartial(bars, peaks, arcDeg) {
+  const W = canvas.width, H = canvas.height;
+  const n = bars.length;
+  if (n === 0) return;
+
+  const halfRad = arcDeg * Math.PI / 360;
+  const sinH    = Math.max(1e-6, Math.sin(halfRad));
+  const cosH    = Math.cos(halfRad);
+  const R       = Math.min((W * 0.48) / sinH, 5000);
+  const cx      = W / 2;
+  const cy      = H + R * cosH;
+  const arcTopY = cy - R;
+  const maxBarH = Math.max(10, arcTopY - 4);
+  const gapDeg  = arcDeg / n;
+  const startDeg = -arcDeg / 2;
+  const dbl      = cfg.double_sided;
+
+  function tipPoint(i, vals, sign) {
+    const thetaRad = (startDeg + (i + 0.5) * gapDeg) * Math.PI / 180;
+    const r  = R + sign * vals[i] * maxBarH;
+    // In screen coords: translate(cx,cy) then rotate(theta) then -r on y-axis
+    // → screen = (cx + r*sin(theta), cy - r*cos(theta))
+    return [cx + r * Math.sin(thetaRad), cy - r * Math.cos(thetaRad)];
+  }
+
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const [x, y] = tipPoint(i, bars, -1);  // sign=-1: outward = away from below-center
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  if (dbl) {
+    for (let i = n - 1; i >= 0; i--) {
+      const [x, y] = tipPoint(i, bars, 1);
+      ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+  ctx.strokeStyle = barColorAt(0.75);
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+
+  if (cfg.peak_hold) {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const [x, y] = tipPoint(i, peaks, -1);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = peakColor();
+    ctx.lineWidth   = 1;
+    ctx.globalAlpha = 0.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ── Circle line ───────────────────────────────────────────────────────────────
+function drawLineCircle(bars, peaks) {
+  const W = canvas.width, H = canvas.height;
+  const n = bars.length;
+  if (n === 0) return;
+
+  const margin = 6;
+  const R_outer = Math.min(W, H) / 2 - margin;
+  const dbl     = cfg.double_sided;
+  const R_base  = R_outer * (dbl ? (0.35 + 0.42) / 2 : 0.40);
+  const maxBarH = R_outer - R_base;
+  const cx = W / 2, cy = H / 2;
+
+  // Apply ouroboros to peaks too for line mode
+  function circlePt(i, vals, sign) {
+    const theta = (i * 360 / n - 90) * Math.PI / 180;
+    const r = R_base + sign * vals[i] * maxBarH;
+    return [cx + r * Math.cos(theta), cy + r * Math.sin(theta)];
+  }
+
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const [x, y] = circlePt(i % n, bars, 1);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = barColorAt(0.75);
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+
+  if (dbl) {
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const [x, y] = circlePt(i % n, bars, -1);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  if (cfg.peak_hold) {
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const [x, y] = circlePt(i % n, peaks, 1);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = peakColor();
+    ctx.lineWidth   = 1;
+    ctx.globalAlpha = 0.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ── Waterfall ─────────────────────────────────────────────────────────────────
+function drawWaterfall(bars) {
+  const W = canvas.width, H = canvas.height;
+  const n = bars.length;
+  if (n === 0) return;
+
+  waterfallRows.unshift(bars.slice());
+  const maxRows = Math.min(500, H);
+  if (waterfallRows.length > maxRows) waterfallRows.length = maxRows;
+
+  const rowH = H / Math.min(waterfallRows.length, H);
+  const barW = W / n;
+
+  for (let row = 0; row < waterfallRows.length; row++) {
+    const r   = waterfallRows[row];
+    const y   = row * rowH;
+    if (y > H) break;
+    for (let i = 0; i < r.length; i++) {
+      ctx.globalAlpha = r[i];
+      ctx.fillStyle   = barColorAt(r[i]);
+      ctx.fillRect(i * barW, y, barW + 1, rowH + 1);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ── Main render frame ─────────────────────────────────────────────────────────
+function frame(ts) {
+  requestAnimationFrame(frame);
+  if (!cfg) return;
+
+  // FPS cap
+  const targetMs = 1000 / Math.max(1, cfg.fps_target);
+  if (ts - lastFrameTs < targetMs - 2) return;
+  lastFrameTs = ts;
+
+  physicsUpdate();
+  _flatGrad = null;   // invalidate cached gradient if colour cfg changed
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const [dBars, dPeaks] = applyOuroboros(displayBars, displayPeaks);
+  const mode   = cfg.vis_mode;
+  const camber = cfg.camber_degrees;
+
+  if (mode === 'waterfall') {
+    drawWaterfall(dBars);
+  } else if (mode === 'line') {
+    if      (camber < 1.0)        drawLineFlat(dBars, dPeaks);
+    else if (camber >= 359.5)     drawLineCircle(dBars, dPeaks);
+    else                          drawLineArcPartial(dBars, dPeaks, camber);
+  } else {
+    if      (camber < 1.0)        drawBarsFlat(dBars, dPeaks);
+    else if (camber >= 359.5)     drawBarsCircle(dBars, dPeaks);
+    else                          drawBarsArcPartial(dBars, dPeaks, camber);
+  }
+}
+
+// ── Config fetch + boot ───────────────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const r = await fetch(`http://${HOST}/spectrogram/config/${encodeURIComponent(PRESET)}`);
+    if (!r.ok) throw new Error(r.status);
+    applyConfig(await r.json());
+    connect();
+    requestAnimationFrame(frame);
+  } catch (e) {
+    status.textContent = 'config error — retrying…';
+    setTimeout(loadConfig, 3000);
+  }
+}
+
+loadConfig();
+</script>
+</body>
+</html>

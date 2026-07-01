@@ -1,0 +1,61 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+dist/
+*.egg-info/
+
+# PyInstaller — scripts/spec committed, outputs excluded
+build/__pycache__/
+build/*.pyc
+build/work/
+build/dist/
+build/musicplayer/
+build/musicplayer-debug/
+build/musicplayer-audit/
+build/musicplayer-debug.spec
+
+# Runtime / local config
+.env
+_bundled_version.txt
+.venv
+venv/
+env/
+config.json
+*.json
+!package.json
+.ruff_cache/
+
+# Binaries
+*.exe
+*.app
+*.AppImage
+
+# Cloudflare Worker
+cf_worker/
+
+# Claude Code session data
+.claude/
+CLAUDE.md
+MEMORY.md
+memory/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
+
+# Logs / keys
+*.log
+*.pem
+*.key
+*.jwk
+*.p12
+*.pfx
+
+# Node
+node_modules/

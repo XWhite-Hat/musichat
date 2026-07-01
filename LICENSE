@@ -1,0 +1,50 @@
+MIT License
+
+Copyright (c) 2026 Xwhitehat
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Intended Use and Media Rights
+-------------------------------------------------------------------------------
+
+MusicHat is a stream interaction and queue management application. Its primary
+designed function is enabling live-stream audiences to participate in a
+moderated song queue and to display audio visualizations during live
+presentations. The application uses the yt-dlp library as a technical
+transport layer to resolve and access audio streams at URLs supplied by end
+users.
+
+This software does not grant, imply, or substitute for any copyright license,
+public performance right, synchronization right, or other intellectual
+property right in the media content accessed through it. Copyright in musical
+works, sound recordings, and audiovisual content belongs to the respective
+rights holders and is unaffected by use of this software.
+
+Public performance of copyrighted music — including in live streams — typically
+requires a license from the applicable performing rights organization in your
+jurisdiction (such as ASCAP, BMI, SESAC, SOCAN, PRS for Music, APRA AMCOS, or
+equivalent bodies). Users of this application are expected to have obtained all
+necessary rights and licenses for any music they present publicly through it
+before doing so.
+
+The ability to resolve and access audio streams is incidental to the
+application's core purpose of audience interaction, queue moderation, and
+visualization. This application is not designed or intended as a substitute for
+a licensed music distribution or streaming service.

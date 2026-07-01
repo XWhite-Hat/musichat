@@ -1,0 +1,3365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>musichat · settings</title>
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<style>
+:root {
+  --bg:      #0a0f0a;
+  --surface: #0e160e;
+  --card:    #111811;
+  --border:  #1e2e1e;
+  --accent:  #00ff41;
+  --text:    #b8ffca;
+  --dim:     #4d8a5f;
+  --danger:  #ff4444;
+  --warn:    #ffaa00;
+  --radius:  4px;
+  --sidebar: 200px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 13px; line-height: 1.5;
+  display: flex; height: 100vh; overflow: hidden;
+}
+
+/* ── Sidebar ── */
+#sidebar {
+  width: var(--sidebar); min-width: var(--sidebar);
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+#sidebar header {
+  padding: 16px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+#sidebar header h1 { font-size: 12px; color: var(--accent); letter-spacing: .04em; }
+#sidebar header .sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
+#nav { padding: 8px 0; flex: 1; }
+.nav-item {
+  display: block; padding: 7px 14px; color: var(--dim);
+  text-decoration: none; cursor: pointer; border-left: 2px solid transparent;
+  font-size: 12px; white-space: nowrap; transition: color .15s;
+}
+.nav-item:hover { color: var(--text); }
+.nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,255,65,.04); }
+#save-state {
+  padding: 10px 14px; font-size: 11px; color: var(--dim);
+  border-top: 1px solid var(--border);
+}
+#save-state.saving { color: var(--warn); }
+#save-state.saved  { color: var(--accent); }
+#save-state.error  { color: var(--danger); }
+
+/* ── Main content ── */
+#main {
+  flex: 1; overflow-y: auto; padding: 0 0 40px;
+}
+.section {
+  padding: 28px 32px;
+  border-bottom: 1px solid var(--border);
+}
+.section h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--dim); margin-bottom: 20px;
+}
+
+/* ── Field layout ── */
+.field-row {
+  display: grid; grid-template-columns: 200px 1fr;
+  gap: 8px 16px; align-items: start;
+  margin-bottom: 14px;
+}
+.field-row label { color: var(--dim); font-size: 12px; padding-top: 6px; }
+.field-row .hint { grid-column: 2; font-size: 11px; color: var(--dim); margin-top: 2px; }
+/* ── Restart-required banner (sticky top of #main) ── */
+#restart-banner {
+  position: sticky; top: 0; z-index: 100;
+  display: none; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 9px 20px;
+  background: rgba(255,150,30,.1); border-bottom: 1px solid rgba(255,150,30,.3);
+  color: var(--warn, #ffaa00); font-size: 12px; letter-spacing: .01em;
+}
+#restart-banner.visible { display: flex; }
+#restart-banner button {
+  flex-shrink: 0; padding: 4px 12px; font-size: 11px;
+  border: 1px solid currentColor; border-radius: var(--radius);
+  background: transparent; color: inherit; cursor: pointer;
+  white-space: nowrap;
+}
+#restart-banner button:hover { background: rgba(255,150,30,.15); }
+
+/* ── Update available banner ── */
+#update-banner {
+  position: sticky; top: 0; z-index: 103;
+  display: none; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 9px 20px;
+  background: rgba(34,197,94,.10); border-bottom: 1px solid rgba(34,197,94,.30);
+  color: #4ade80; font-size: 12px; letter-spacing: .01em;
+}
+#update-banner.visible { display: flex; }
+#update-banner .update-msg { flex: 1; }
+#update-banner button {
+  flex-shrink: 0; padding: 4px 12px; font-size: 11px;
+  border: 1px solid currentColor; border-radius: var(--radius);
+  background: transparent; color: inherit; cursor: pointer;
+  white-space: nowrap;
+}
+#update-banner button:hover { background: rgba(34,197,94,.15); }
+#update-banner .update-dismiss { opacity: .55; }
+
+/* ── Re-authentication required banner ── */
+#reauth-banner {
+  position: sticky; top: 0; z-index: 102;
+  display: none; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 9px 20px;
+  background: rgba(220,50,50,.12); border-bottom: 1px solid rgba(220,50,50,.35);
+  color: var(--danger, #e05555); font-size: 12px; letter-spacing: .01em;
+}
+#reauth-banner.visible { display: flex; }
+#reauth-banner .reauth-msg { flex: 1; }
+#reauth-banner button {
+  flex-shrink: 0; padding: 4px 12px; font-size: 11px;
+  border: 1px solid currentColor; border-radius: var(--radius);
+  background: transparent; color: inherit; cursor: pointer;
+  white-space: nowrap;
+}
+#reauth-banner button:hover { background: rgba(220,50,50,.15); }
+#reauth-banner .reauth-dismiss { opacity: .55; }
+
+/* ── Performance strip ── */
+#perf-strip {
+  padding: 12px 32px;
+  background: rgba(0,255,65,.025);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 20px;
+}
+.perf-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--dim); white-space: nowrap;
+}
+.perf-slider-row { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.perf-extreme { font-size: 11px; color: var(--dim); white-space: nowrap; }
+.perf-extreme.high { color: var(--accent); }
+.perf-fps-display { font-size: 11px; color: var(--dim); white-space: nowrap; min-width: 52px; text-align: right; }
+.perf-fps-display span { color: var(--text); }
+
+/* ── Inputs ── */
+input[type=text], input[type=password], input[type=number],
+input[type=url], select, textarea {
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--text); font-family: inherit; font-size: 12px;
+  padding: 5px 8px; border-radius: var(--radius);
+  outline: none; width: 100%; transition: border-color .15s;
+}
+input[type=text]:focus, input[type=password]:focus,
+input[type=number]:focus, input[type=url]:focus,
+select:focus, textarea:focus { border-color: var(--accent); }
+input[type=color] {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); height: 30px; width: 60px;
+  padding: 2px 4px; cursor: pointer;
+}
+textarea { resize: vertical; min-height: 70px; }
+select { cursor: pointer; }
+select option { background: var(--card); }
+
+/* ── Toggle / checkbox ── */
+.toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.toggle-label { color: var(--dim); font-size: 12px; }
+input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+
+/* ── Buttons ── */
+button {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text); font-family: inherit; font-size: 12px;
+  padding: 5px 14px; border-radius: var(--radius); cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.accent { border-color: var(--accent); color: var(--accent); }
+button.accent:hover { background: rgba(0,255,65,.08); }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button.danger:hover { background: rgba(255,68,68,.08); }
+button:disabled { opacity: .4; cursor: default; }
+/* inline text-link style */
+button.link-btn {
+  border: none; padding: 0; font-size: 11px;
+  color: var(--dim); text-decoration: underline;
+  background: none; cursor: pointer;
+}
+button.link-btn:hover { color: var(--accent); border: none; background: none; }
+
+/* ── Auth card ── */
+.auth-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px;
+}
+.auth-card .status { font-size: 12px; margin-bottom: 8px; }
+.auth-card .signed-in  { color: var(--accent); }
+.auth-card .signed-out { color: var(--dim); }
+.auth-card .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.auth-card .waiting { font-size: 11px; color: var(--warn); margin-top: 6px; display: none; }
+
+/* ── Consent overlay (one-time full-screen modal) ── */
+#consent-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,15,10,.94);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+#consent-overlay.visible { opacity: 1; pointer-events: all; }
+#consent-box {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 28px 32px;
+  max-width: 560px; width: calc(100vw - 48px);
+  font-size: 13px; line-height: 1.8;
+}
+#consent-box h2 { color: var(--accent); font-size: 13px; letter-spacing: .03em; margin-bottom: 14px; }
+#consent-box p  { color: var(--text); margin-bottom: 12px; }
+#consent-box a { color: var(--accent); }
+.consent-check {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 16px 0 12px; font-size: 12px; color: var(--dim); cursor: pointer;
+}
+.consent-check input { flex-shrink: 0; margin-top: 2px; }
+#consent-confirm-btn { margin-top: 4px; width: 100%; padding: 8px; font-size: 13px; }
+
+/* ── Post-consent info popover ── */
+#consent-popover {
+  position: fixed; inset: 0;
+  background: rgba(10,15,10,.88);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 999;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+#consent-popover.visible { opacity: 1; pointer-events: all; }
+#consent-popover-box {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px 28px;
+  max-width: 500px; width: calc(100vw - 48px);
+  font-size: 12px; line-height: 1.7; color: var(--dim);
+}
+#consent-popover-box h3 { color: var(--text); font-size: 12px; margin-bottom: 10px; }
+#consent-popover-box a { color: var(--accent); }
+#consent-popover-close { margin-top: 14px; width: 100%; }
+
+/* ── Bot URL overlay ── */
+#bot-url-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,15,10,.94);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 998;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+#bot-url-overlay.visible { opacity: 1; pointer-events: all; }
+#bot-url-box {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px 28px;
+  max-width: 480px; width: calc(100vw - 48px);
+  font-size: 13px; line-height: 1.7;
+}
+#bot-url-box h2 { color: var(--accent); font-size: 13px; margin-bottom: 12px; }
+#bot-url-box p  { color: var(--dim); margin-bottom: 8px; }
+
+/* ── Tier table ── */
+.tier-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tier-table th {
+  text-align: left; padding: 4px 10px 4px 0;
+  color: var(--dim); font-weight: normal; border-bottom: 1px solid var(--border);
+}
+.tier-table td { padding: 5px 10px 5px 0; }
+.tier-table td input[type=number] { width: 70px; }
+.tier-label { color: var(--text); font-size: 12px; }
+
+/* ── Command alias chips ── */
+.cmd-row { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.cmd-row:last-child { border-bottom: none; margin-bottom: 0; }
+.cmd-name { font-family: monospace; font-size: .9em; color: var(--text); }
+.cmd-desc { color: var(--dim); font-size: .78em; }
+.alias-chips { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; }
+.alias-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 1px 7px; border-radius: 3px; font-size: .78em; font-family: monospace;
+}
+.alias-default { background: rgba(255,255,255,.07); color: var(--dim); }
+.alias-custom  { background: rgba(125,255,154,.12); color: var(--accent, #7dff9a); }
+.alias-rm {
+  background: none; border: none; color: var(--dim); cursor: pointer;
+  padding: 0 0 0 2px; font-size: .9em; line-height: 1;
+}
+.alias-rm:hover { color: var(--red, #ff4444); }
+.alias-add-form { position: relative; display: inline-flex; gap: 4px; align-items: center; }
+.alias-add-input { width: 90px; font-size: .78em; padding: 2px 5px; font-family: monospace; }
+.alias-add-btn  { font-size: .78em; padding: 2px 8px; }
+
+/* ── Alias prefix speech bubble ── */
+.alias-prefix-tip {
+  display: none; position: absolute; bottom: calc(100% + 6px); left: 0;
+  background: var(--surface); border: 1px solid var(--warn, #ffaa00);
+  color: var(--text); font-size: .75em; padding: 5px 9px; border-radius: 4px;
+  white-space: nowrap; z-index: 200; pointer-events: none; line-height: 1.4;
+}
+.alias-prefix-tip::after {
+  content: ''; position: absolute; top: 100%; left: 10px;
+  border: 5px solid transparent; border-top-color: var(--warn, #ffaa00);
+}
+.alias-prefix-tip.visible { display: block; }
+
+/* ── Bot-restart button (inline under commands & aliases) ── */
+#bot-restart-btn {
+  margin-top: 10px; display: inline-block;
+  padding: 6px 16px; font-size: 12px; letter-spacing: .03em;
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); cursor: pointer; border-radius: var(--radius);
+  transition: color .15s, border-color .15s, opacity .2s;
+}
+#bot-restart-btn:hover:not(.restarting):not(.needs-restart) { border-color: var(--accent); color: var(--accent); }
+#bot-restart-btn.needs-restart {
+  cursor: pointer; animation: btn-alert 2s ease-in-out infinite;
+}
+@keyframes btn-alert {
+  0%,100% { border-color: #ff7700; color: #ff7700; transform: translateY(0); box-shadow: none; }
+  20%     { transform: translateY(-5px); box-shadow: 0 5px 14px rgba(255,119,0,.35); }
+  30%     { transform: translateY(-2px); }
+  55%     { border-color: #ff2255; color: #ff2255; transform: translateY(0); box-shadow: none; }
+  75%     { transform: translateY(-5px); box-shadow: 0 5px 14px rgba(255,34,85,.35); }
+  85%     { transform: translateY(-2px); }
+}
+#bot-restart-btn.restarting {
+  border-color: var(--dim); color: var(--dim);
+  cursor: not-allowed; pointer-events: none; opacity: .6; animation: none;
+}
+
+/* ── Twitch nav restart-needed state ── */
+.nav-item.restart-needed { color: #ff7070 !important; border-left-color: #ff5555 !important; }
+.nav-item.danger-nav { color: rgba(255,68,68,.55); }
+.nav-item.danger-nav:hover { color: var(--danger); }
+.nav-item.danger-nav.active { color: var(--danger); border-left-color: var(--danger); background: rgba(255,68,68,.04); }
+
+/* ── Removal confirm overlay ── */
+#removal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,15,10,.92);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s;
+}
+#removal-overlay.visible { opacity: 1; pointer-events: all; }
+#removal-box {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 28px 32px;
+  max-width: 440px; width: calc(100vw - 48px);
+}
+#removal-box h3 { font-size: 13px; color: var(--danger); margin-bottom: 12px; letter-spacing: .02em; }
+#removal-box p  { font-size: 12px; color: var(--text); line-height: 1.7; margin-bottom: 18px; }
+#removal-box .removal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ── Twitch section disabled-during-restart overlay ── */
+#twitch.section-restarting { pointer-events: none; opacity: .45; transition: opacity .3s; }
+
+/* ── Gradient preview ── */
+.gradient-preview {
+  height: 20px; border-radius: var(--radius);
+  border: 1px solid var(--border); margin-bottom: 8px; transition: all .3s;
+}
+.color-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.color-row label { font-size: 11px; color: var(--dim); min-width: 36px; }
+
+/* ── Range slider ── */
+input[type=range] { accent-color: var(--accent); width: 100%; }
+.range-row { display: flex; align-items: center; gap: 10px; }
+.range-val { color: var(--dim); font-size: 11px; min-width: 40px; text-align: right; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--card); border: 1px solid var(--border);
+  padding: 8px 14px; border-radius: var(--radius); font-size: 12px;
+  opacity: 0; transition: opacity .3s; pointer-events: none;
+}
+#toast.show { opacity: 1; }
+#toast.ok    { border-color: var(--accent); color: var(--accent); }
+#toast.error { border-color: var(--danger); color: var(--danger); }
+#toast.warn  { border-color: var(--warn);   color: var(--warn); }
+
+/* ── Shape selector ── */
+.shape-selector { display: flex; gap: 6px; flex-wrap: wrap; }
+.shape-btn {
+  padding: 4px 14px; font-size: 12px;
+  border: 1px solid var(--border); color: var(--dim);
+  border-radius: var(--radius);
+}
+.shape-btn.active {
+  border-color: var(--accent); color: var(--accent);
+  background: rgba(0,255,65,.06);
+}
+.shape-btn:hover { border-color: var(--text); color: var(--text); }
+.shape-btn.active:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Subsection ── */
+.subsection { margin-top: 22px; }
+.subsection h3 { font-size: 11px; color: var(--dim); margin-bottom: 12px; letter-spacing: .06em; }
+
+/* ── OBS minimum-size hint ── */
+.obs-min-hint {
+  font-size: 11px; color: var(--dim);
+  margin: -4px 0 10px 0; padding: 3px 0;
+  transition: color .15s;
+}
+.obs-min-hint.conflict { color: var(--danger); font-weight: 600; }
+@keyframes obs-pulse {
+  0%  { transform: scale(1);    }
+  25% { transform: scale(1.14); }
+  55% { transform: scale(0.93); }
+  80% { transform: scale(1.05); }
+  100%{ transform: scale(1);    }
+}
+.obs-min-hint.pulse { animation: obs-pulse 0.38s ease-out; }
+.obs-field-conflict > input[type="number"] {
+  border-color: var(--danger) !important;
+  background: rgba(255,68,68,0.07) !important;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<div id="sidebar">
+  <header>
+    <h1>> settings</h1>
+    <div class="sub">musichat</div>
+  </header>
+  <nav id="nav">
+    <a class="nav-item" href="#spectrogram" data-section="spectrogram">spectrogram</a>
+    <a class="nav-item" href="#audio"       data-section="audio">audio</a>
+    <a class="nav-item" href="#youtube"     data-section="youtube">vibe-matching</a>
+    <a class="nav-item" href="#twitch"      data-section="twitch">twitch</a>
+    <a class="nav-item" id="server-nav-item" href="#server" data-section="server">server</a>
+    <a class="nav-item" href="#obs"         data-section="obs">obs overlays</a>
+    <a class="nav-item danger-nav" href="#local-data" data-section="local-data">local data</a>
+  </nav>
+  <div id="save-state">all changes saved</div>
+</div>
+
+<!-- ── Main ── -->
+<div id="main">
+
+<!-- Sticky restart banner — visible only when bot-restart is pending -->
+<div id="restart-banner">
+  <span>⚠ service restart required — prefix / alias changes won't apply until the service restarts</span>
+  <button onclick="_doRestartBot()">restart now</button>
+</div>
+
+<!-- Update available banner — shown when a newer GitHub release is detected -->
+<div id="update-banner">
+  <span class="update-msg" id="update-banner-msg">a new version of MusicHat is available</span>
+  <a id="update-release-link" href="#" target="_blank" style="color:inherit">
+    <button>view release</button>
+  </a>
+  <button class="update-dismiss" onclick="document.getElementById('update-banner').classList.remove('visible')">dismiss</button>
+</div>
+
+<!-- Re-authentication required banner — shown when token is revoked/replaced -->
+<div id="reauth-banner">
+  <span class="reauth-msg" id="reauth-banner-msg">⚠ re-authentication required</span>
+  <button onclick="document.querySelector('.nav-item[data-section=\'twitch\']')?.click()">go to accounts</button>
+  <button class="reauth-dismiss" onclick="document.getElementById('reauth-banner').classList.remove('visible')">dismiss</button>
+</div>
+
+<!-- ── Overlay performance strip ── -->
+<div id="perf-strip">
+  <span class="perf-label">overlay fps</span>
+  <div class="perf-slider-row">
+    <span class="perf-extreme">potato</span>
+    <input type="range" id="overlay-fps" data-path="overlay_fps"
+           min="1" max="60" step="1" value="30">
+    <span class="perf-extreme high">buttery</span>
+  </div>
+  <span class="perf-fps-display"><span id="overlay-fps-val">30</span> fps</span>
+</div>
+
+  <!-- ──── SPECTROGRAM ──── -->
+  <section class="section" id="spectrogram">
+    <h2>spectrogram</h2>
+
+    <div class="field-row">
+      <label>active preset</label>
+      <div style="display:flex; gap:8px; align-items:center">
+        <select id="preset-select" style="max-width:200px"></select>
+        <button id="preset-new-btn">+ new</button>
+        <button id="preset-rename-btn">rename</button>
+        <button id="preset-delete-btn" class="danger">delete</button>
+        <button id="preset-copy-link-btn" title="Copy OBS browser source URL for this preset">copy link</button>
+      </div>
+    </div>
+
+    <div id="preset-editor">
+      <div class="subsection">
+        <h3>gradient</h3>
+        <div class="field-row" style="margin-bottom:10px">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
+            <input type="checkbox" id="cover-art-match"
+                   data-path="spectrogram.cover_art_match">
+            cover art match
+          </label>
+          <span class="hint" style="margin-left:8px">
+            auto-sets low/mid/high from the track's thumbnail each time a song starts
+          </span>
+        </div>
+        <div id="gradient-preview" class="gradient-preview"></div>
+        <div id="manual-colour-row">
+          <div class="color-row">
+            <label>low</label>
+            <input type="color" id="color-start" data-path="spectrogram.color_start">
+            <label>mid</label>
+            <input type="color" id="color-mid"   data-path="spectrogram.color_mid">
+            <label>high</label>
+            <input type="color" id="color-end"   data-path="spectrogram.color_end">
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <h3>bars</h3>
+        <div class="field-row">
+          <label>bar count</label>
+          <div class="range-row">
+            <input type="range" id="bar-count" data-path="spectrogram.bar_count"
+                   min="8" max="256" step="4">
+            <span class="range-val" id="bar-count-val">64</span>
+          </div>
+        </div>
+        <div class="field-row">
+          <label>bar gap (px)</label>
+          <input type="number" id="bar-gap" data-path="spectrogram.bar_gap"
+                 min="0" max="30" style="max-width:80px">
+          <div class="hint">wide gaps with many bars shrink bar width — reduce bar count if they disappear</div>
+        </div>
+        <div class="field-row">
+          <label>min bar height (px)</label>
+          <input type="number" id="bar-min-height" data-path="spectrogram.bar_min_height"
+                 min="0" max="20" style="max-width:80px">
+          <div class="hint">floor so silent bars remain a sliver</div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <h3>frequency window</h3>
+        <div class="field-row">
+          <label>min (Hz)</label>
+          <input type="number" id="freq-min" data-path="spectrogram.freq_min"
+                 min="20" max="1000" style="max-width:100px">
+        </div>
+        <div class="field-row">
+          <label>max (Hz)</label>
+          <input type="number" id="freq-max" data-path="spectrogram.freq_max"
+                 min="1000" max="24000" style="max-width:100px">
+        </div>
+        <div class="field-row">
+          <label>smoothing</label>
+          <div class="range-row">
+            <input type="range" id="smoothing" data-path="spectrogram.smoothing"
+                   min="0" max="0.99" step="0.01">
+            <span class="range-val" id="smoothing-val">0.75</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="subsection">
+        <h3>peak hold</h3>
+        <div class="toggle-row">
+          <input type="checkbox" id="peak-hold" data-path="spectrogram.peak_hold">
+          <label class="toggle-label" for="peak-hold">enable peak hold markers</label>
+        </div>
+        <div class="field-row">
+          <label>hold frames</label>
+          <input type="number" id="peak-hold-frames" data-path="spectrogram.peak_hold_frames"
+                 min="5" max="300" style="max-width:80px">
+        </div>
+      </div>
+
+      <div class="subsection">
+        <h3>shape</h3>
+        <div class="field-row">
+          <label>style</label>
+          <div class="shape-selector" id="shape-selector">
+            <button class="shape-btn" data-shape="inline">inline</button>
+            <button class="shape-btn" data-shape="bend">bend</button>
+            <button class="shape-btn" data-shape="corner">90°</button>
+            <button class="shape-btn" data-shape="circle">full circle</button>
+          </div>
+        </div>
+
+        <!-- shown only for bend -->
+        <div class="field-row" id="bend-row" style="display:none">
+          <label>arc (°)</label>
+          <div class="range-row">
+            <input type="range" id="bend-degrees" min="1" max="89" step="1" value="45">
+            <span class="range-val" id="bend-degrees-val">45</span>
+          </div>
+        </div>
+
+        <!-- shown only for full circle -->
+        <div class="toggle-row" id="ouroboros-row" style="display:none">
+          <input type="checkbox" id="camber-asymmetric" data-path="spectrogram.camber_asymmetric">
+          <label class="toggle-label" for="camber-asymmetric">
+            ouroboros — blend first and last bars seamlessly
+          </label>
+        </div>
+
+        <!-- feature — visible for every shape -->
+        <div class="field-row" style="margin-top:10px">
+          <label>feature</label>
+          <select id="feature-select" style="max-width:180px">
+            <option value="none">none</option>
+            <option value="double-sided">double-sided</option>
+            <option value="inverted">inverted</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="subsection" id="obs-canvas-section">
+        <h3>canvas (OBS browser source)</h3>
+        <div id="obs-min-hint" class="obs-min-hint" style="display:none">
+          min: <span id="obs-min-w">—</span> × <span id="obs-min-h">—</span> px
+        </div>
+        <div class="field-row" id="obs-width-row">
+          <label>width (px)</label>
+          <input type="number" id="obs-width" data-path="spectrogram.obs_width"
+                 min="200" max="3840" style="max-width:100px">
+        </div>
+        <div class="field-row" id="obs-height-row">
+          <label>height (px)</label>
+          <input type="number" id="obs-height" data-path="spectrogram.obs_height"
+                 min="50" max="1080" style="max-width:100px">
+        </div>
+        <div class="field-row">
+          <label>background alpha</label>
+          <div class="range-row">
+            <input type="range" id="bg-alpha" data-path="spectrogram.background_alpha"
+                   min="0" max="255" step="1">
+            <span class="range-val" id="bg-alpha-val">255</span>
+          </div>
+          <div class="hint">0 = transparent (OBS compositing), 255 = solid</div>
+        </div>
+      </div>
+    </div><!-- #preset-editor -->
+  </section>
+
+  <!-- ──── AUDIO ──── -->
+  <section class="section" id="audio">
+    <h2>audio</h2>
+    <div class="field-row">
+      <label>output device</label>
+      <select id="audio-device" data-path="audio.output_device" style="max-width:360px">
+        <option value="">loading devices…</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <label>sample rate</label>
+      <select id="audio-rate" data-path="audio.sample_rate" style="max-width:160px">
+        <option value="44100">44 100 Hz</option>
+        <option value="48000">48 000 Hz</option>
+        <option value="96000">96 000 Hz</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <label>channels</label>
+      <select id="audio-channels" data-path="audio.channels" style="max-width:120px">
+        <option value="1">mono</option>
+        <option value="2">stereo</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <label>block size</label>
+      <select id="audio-blocksize" data-path="audio.blocksize" style="max-width:160px">
+        <option value="512">512</option>
+        <option value="1024">1024 (default)</option>
+        <option value="2048">2048</option>
+        <option value="4096">4096</option>
+      </select>
+      <div class="hint">larger = lower CPU, higher latency</div>
+    </div>
+  </section>
+
+  <!-- ──── VIBE-MATCHING ──── -->
+  <section class="section" id="youtube">
+    <h2>vibe-matching</h2>
+    <div class="subsection">
+      <h3>vibe-match settings</h3>
+      <div class="hint" style="margin-bottom:8px">
+        Vibe-match is toggled from the main player window. These settings control its behaviour.
+      </div>
+      <div class="field-row">
+        <label>playlist delay (tracks)</label>
+        <input type="number" id="yt-suggest-thresh" data-path="youtube.suggestion_threshold"
+               min="1" max="20" style="max-width:80px">
+        <div class="hint">when a playlist is started with vibe-match already on, wait this many tracks before auto-filling — has no effect on single-song vibe-match, which always fills immediately</div>
+      </div>
+      <div class="field-row">
+        <label>tracks to pull per cycle</label>
+        <input type="number" id="yt-suggest-count" data-path="youtube.suggestion_count"
+               min="1" max="20" style="max-width:80px">
+        <div class="hint">how many vibe-matched tracks to fetch per suggestion cycle</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── TWITCH ──── -->
+  <section class="section" id="twitch">
+    <h2>twitch</h2>
+
+    <!-- Auth mode / BYOI -->
+    <div class="field-row" style="margin-bottom:20px">
+      <label>auth mode</label>
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span id="auth-mode-badge" style="font-size:11px;padding:2px 10px;border-radius:999px;background:rgba(139,92,246,.15);color:#a78bfa;font-weight:600">proxied</span>
+          <span id="auth-mode-desc" class="hint" style="margin:0;font-size:11px"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <code id="byoi-env-path" style="font-size:10px;color:var(--dim);flex:1;word-break:break-all"></code>
+          <button id="open-env-btn" style="flex-shrink:0;white-space:nowrap">Open .env</button>
+        </div>
+        <div class="hint">
+          Uncomment <code>TWITCH_CLIENT_ID=…</code> in that file to use your own Twitch app
+          instead of the default proxy, then restart MusicHat.
+        </div>
+      </div>
+    </div>
+
+    <!-- Streamer account -->
+    <div class="auth-card" id="streamer-card">
+      <div class="status">
+        <span id="streamer-status" class="signed-out">not signed in</span>
+      </div>
+      <div class="actions">
+        <button id="streamer-signin-btn" class="accent">sign in with twitch</button>
+        <button id="streamer-signout-btn" class="danger" style="display:none">sign out</button>
+        <button class="link-btn" id="streamer-consent-link" style="display:none"
+                onclick="openConsentPopover()">auth info</button>
+      </div>
+      <div class="waiting" id="streamer-waiting">&#x23F3; waiting for browser…</div>
+    </div>
+
+    <!-- Everything below requires a streamer sign-in — hidden via updateSignInGating() -->
+    <div id="streamer-gated" style="display:none">
+
+    <!-- Bot account -->
+    <div class="toggle-row">
+      <input type="checkbox" id="use-separate-bot" data-path="twitch.use_separate_bot">
+      <label class="toggle-label" for="use-separate-bot">use a separate bot account</label>
+    </div>
+    <div id="bot-section" style="display:none">
+      <div class="auth-card" id="bot-card">
+        <div class="status">
+          <span id="bot-status" class="signed-out">no bot account set</span>
+        </div>
+        <div class="actions">
+          <button id="bot-signin-btn" class="accent">sign in with bot account</button>
+          <button id="bot-signout-btn" class="danger" style="display:none">remove bot</button>
+          <button class="link-btn" id="bot-consent-link" style="display:none"
+                  onclick="openConsentPopover()">auth info</button>
+        </div>
+        <div class="waiting" id="bot-waiting">&#x23F3; waiting for browser…</div>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>channel settings</h3>
+      <div class="field-row">
+        <label>command prefix</label>
+        <input type="text" id="twitch-prefix" data-path="twitch.prefix"
+               style="max-width:80px" placeholder="!">
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>request tiers</h3>
+      <table class="tier-table">
+        <thead>
+          <tr>
+            <th>tier</th><th>can request</th>
+            <th>queue limit</th><th>cooldown (s)</th><th>max / stream</th>
+          </tr>
+        </thead>
+        <tbody id="tier-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="subsection">
+      <h3>channel points</h3>
+
+      <!-- deleted-reward warning — shown via WS event on startup if reward was removed -->
+      <div id="cp-warning" style="display:none">
+        <div class="hint" style="color:var(--amber,#ffb347);margin-bottom:8px">
+          ⚠ the &ldquo;Song Request&rdquo; reward was deleted from Twitch —
+          re-check the box below to create a new one
+        </div>
+      </div>
+
+      <div class="toggle-row">
+        <!-- No data-path — handled manually below so we can call /setup -->
+        <input type="checkbox" id="cp-enabled">
+        <label class="toggle-label" for="cp-enabled">enable channel point song requests</label>
+        <span id="cp-spinner" style="display:none;margin-left:8px;font-size:.8em" class="dim">creating reward…</span>
+      </div>
+
+      <!-- shown when a reward is active -->
+      <div id="cp-reward-info" class="hint" style="display:none;margin-top:4px">
+        reward: <strong id="cp-reward-title">Song Request</strong> ·
+        <span id="cp-reward-id" class="dim" style="font-size:.75em"></span>
+        <br>
+        <span class="dim" style="font-size:.85em">Created at 200 pts — adjust cost &amp; appearance at:</span><br>
+        <a id="cp-dashboard-link" href="#" target="_blank" rel="noopener"
+           style="font-size:.85em;color:var(--accent,#7dff9a)"></a>
+      </div>
+
+      <div id="cp-error" class="hint" style="display:none;color:var(--red,#ff4444);margin-top:4px"></div>
+    </div>
+
+    <div class="subsection">
+      <h3>blocklist</h3>
+      <div class="field-row">
+        <label>banned terms</label>
+        <textarea id="blacklist-terms" data-path-list="twitch.blacklist_terms"
+                  placeholder="one term per line"></textarea>
+        <div class="hint">songs containing these words will be rejected</div>
+      </div>
+      <div class="field-row">
+        <label>banned users</label>
+        <textarea id="blacklist-users" data-path-list="twitch.blacklist_channels"
+                  placeholder="one username per line"></textarea>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>commands &amp; aliases</h3>
+      <div class="hint" style="margin-bottom:8px">
+        Built-in aliases are shown in grey and cannot be removed.
+        Custom aliases you add here take effect after the service restarts.
+      </div>
+      <div id="commands-table-wrap"></div>
+      <button id="bot-restart-btn">restart service</button>
+    </div>
+
+    </div><!-- #streamer-gated -->
+  </section>
+
+  <!-- ──── SERVER ──── -->
+  <section class="section" id="server">
+    <h2>mod panel server</h2>
+    <div class="field-row">
+      <label>host</label>
+      <input type="text" id="server-host" data-path="server.host"
+             style="max-width:200px" placeholder="127.0.0.1">
+      <div class="hint">127.0.0.1 = local only. Use 0.0.0.0 to expose to your LAN.</div>
+    </div>
+    <div class="field-row">
+      <label>port</label>
+      <input type="number" id="server-port" data-path="server.port"
+             min="1024" max="65535" style="max-width:100px">
+    </div>
+    <div class="field-row">
+      <label>jwt expiry (min)</label>
+      <input type="number" id="jwt-expiry" data-path="server.jwt_expiry_minutes"
+             min="30" max="10080" style="max-width:100px">
+      <div class="hint">mod panel session duration before re-auth required</div>
+    </div>
+
+    <div class="subsection">
+      <h3>tunnel</h3>
+      <div class="field-row">
+        <label>mode</label>
+        <select id="tunnel-mode" data-path="server.tunnel_mode" style="max-width:200px">
+          <option value="none">none (disabled)</option>
+          <option value="cloudflare">cloudflare tunnel</option>
+          <option value="ngrok">ngrok</option>
+          <option value="tailscale">tailscale</option>
+          <option value="self">self-hosted</option>
+        </select>
+      </div>
+      <div id="ngrok-fields" style="display:none">
+        <div class="field-row">
+          <label>ngrok authtoken</label>
+          <input type="password" id="ngrok-token" data-path="server.ngrok_authtoken" autocomplete="off">
+        </div>
+        <div class="field-row">
+          <label>ngrok domain</label>
+          <input type="text" id="ngrok-domain" data-path="server.ngrok_domain"
+                 placeholder="your-tunnel.ngrok-free.app">
+        </div>
+      </div>
+      <div id="cf-tos-row" style="display:none">
+        <div class="toggle-row">
+          <input type="checkbox" id="cf-tos" data-path="server.cloudflare_accepted_tos">
+          <label class="toggle-label" for="cf-tos">
+            I accept the Cloudflare Terms of Service for Cloudflare Tunnel
+          </label>
+        </div>
+      </div>
+      <div id="self-hosted-row" style="display:none">
+        <div class="hint">
+          Forward <strong id="self-hosted-url">http://127.0.0.1:8765</strong> to your
+          external service, then paste the public URL in your reverse proxy or DNS.
+          The mod panel will be reachable at that URL.
+        </div>
+      </div>
+
+      <!-- Tunnel controls — hidden for none / self-hosted modes -->
+      <div id="tunnel-controls" style="display:none">
+        <div class="field-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+          <button id="tunnel-start-btn" onclick="tunnelStart()">▶ Start Tunnel</button>
+          <button class="danger" id="tunnel-stop-btn" onclick="tunnelStop()" style="display:none">■ Stop Tunnel</button>
+          <span id="tunnel-url-display" style="font-size:12px;color:var(--dim);word-break:break-all"></span>
+        </div>
+        <div id="tunnel-error" style="display:none;font-size:12px;color:var(--danger);margin-top:6px;white-space:pre-wrap;word-break:break-all;line-height:1.5"></div>
+        <div class="hint" style="margin-top:10px">
+          <strong>Local panel URL: </strong><span id="local-panel-url" style="font-family:monospace"></span>
+          <br><span style="color:var(--danger);font-size:11px">⚠ For local use only — this URL will not work for your mods. Share the tunnel URL above instead.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── OBS OVERLAYS ──── -->
+  <section class="section" id="obs">
+    <h2>obs overlays</h2>
+    <div class="hint" style="margin-bottom:12px">
+      Add these as Browser Sources in OBS. All URLs use your mod panel port
+      (<span id="obs-port-hint">8765</span>).
+    </div>
+
+    <!-- Spectrogram (URL moved to browser source urls section below) -->
+
+    <!-- Now playing text overlay -->
+    <div class="subsection">
+      <h3>now playing text</h3>
+      <div class="field-row">
+        <label>streamer template</label>
+        <div style="flex:1">
+          <div style="display:flex; gap:6px; align-items:center">
+            <input type="text" id="np-template"
+                   style="flex:1; font-family:monospace"
+                   placeholder="{display}">
+            <button id="np-template-save">save</button>
+          </div>
+          <div class="hint" style="margin-top:4px">
+            playlist / vibe-match / manual plays —
+            variables: <code>{title}</code> <code>{artist}</code> <code>{display}</code>
+            <code>{source}</code> <code>{duration}</code>
+          </div>
+        </div>
+      </div>
+      <div class="field-row">
+        <label>request template</label>
+        <div style="flex:1">
+          <div style="display:flex; gap:6px; align-items:center">
+            <input type="text" id="np-template-requested"
+                   style="flex:1; font-family:monospace"
+                   placeholder="{display} — requested by @{requested_by}">
+            <button id="np-template-requested-save">save</button>
+          </div>
+          <div class="hint" style="margin-top:4px">
+            viewer chat / channel-points requests — same variables plus <code>{requested_by}</code>
+          </div>
+        </div>
+      </div>
+      <div class="field-row">
+        <label>preview</label>
+        <div id="np-preview" class="hint" style="font-style:italic; flex:1">(nothing playing)</div>
+      </div>
+    </div>
+
+    <!-- Text display settings -->
+    <div class="subsection">
+      <h3>text display</h3>
+      <div class="hint" style="margin-bottom:10px">
+        The overlay is centre-aligned — place the browser source anywhere and it stays balanced.
+      </div>
+
+      <div class="field-row">
+        <label>font</label>
+        <select id="text-font-select">
+          <option value="Share Tech Mono">Share Tech Mono</option>
+          <option value="Arial">Arial</option>
+          <option value="Georgia">Georgia</option>
+          <option value="Verdana">Verdana</option>
+          <option value="Trebuchet MS">Trebuchet MS</option>
+          <option value="Courier New">Courier New</option>
+          <option value="Impact">Impact</option>
+          <option value="Oswald">Oswald</option>
+          <option value="Roboto">Roboto</option>
+          <option value="Press Start 2P">Press Start 2P</option>
+          <option value="Custom">Custom (Google Fonts URL)…</option>
+          <option value="__local__">Local font (.ttf / .otf)…</option>
+        </select>
+      </div>
+
+      <!-- Google Fonts URL rows (Custom) -->
+      <div id="custom-font-row" class="field-row" style="display:none">
+        <label>font import URL</label>
+        <div style="flex:1">
+          <input type="text" id="text-font-import-input"
+                 placeholder="https://fonts.googleapis.com/css2?family=Oswald&display=swap"
+                 style="width:100%; font-family:monospace; font-size:.85em">
+          <div class="hint" style="margin-top:4px">
+            paste any Google Fonts CSS URL — injected into the overlay automatically
+          </div>
+        </div>
+      </div>
+      <div id="custom-font-name-row" class="field-row" style="display:none">
+        <label>font name</label>
+        <div style="flex:1">
+          <div style="display:flex; gap:6px">
+            <input type="text" id="text-font-name-input"
+                   placeholder="e.g. Oswald" style="flex:1">
+            <button onclick="_saveCustomFont()">save</button>
+          </div>
+          <div class="hint" style="margin-top:4px">
+            the CSS font-family name exactly as listed in the import
+          </div>
+        </div>
+      </div>
+
+      <!-- Local font file row -->
+      <div id="local-font-row" class="field-row" style="display:none">
+        <label>font file</label>
+        <div style="flex:1">
+          <div style="display:flex; gap:8px; align-items:center">
+            <button onclick="_pickLocalFont()">select file</button>
+            <span id="local-font-filename" class="hint" style="margin:0; flex:1">no file selected</span>
+          </div>
+          <div class="hint" style="margin-top:4px">
+            embedded in config as a data URI — works in OBS even without internet
+          </div>
+          <input type="file" id="local-font-file-input" accept=".ttf,.otf" style="display:none"
+                 onchange="_onLocalFontFileChanged(this)">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label>font size</label>
+        <input type="number" id="text-font-size" data-path="overlay.text_font_size"
+               min="10" max="120" style="max-width:72px">
+        <span class="hint">px</span>
+      </div>
+      <div class="field-row">
+        <label>text color</label>
+        <input type="color" id="text-color" style="width:48px; height:30px; cursor:pointer; padding:2px">
+      </div>
+      <div class="field-row">
+        <label>width</label>
+        <input type="number" id="text-width" data-path="overlay.text_width"
+               min="100" max="3840" step="10" style="max-width:90px">
+        <span class="hint">px — text is centred inside this box</span>
+      </div>
+      <div class="field-row">
+        <label>auto-scroll</label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
+          <input type="checkbox" id="text-scroll"
+                 onchange="patch('overlay.text_scroll', this.checked)">
+          <span class="hint">if text overflows the width, scroll it every 10 s</span>
+        </label>
+      </div>
+
+      <div class="field-row" style="margin-top:12px">
+        <label>OBS source size</label>
+        <span id="obs-text-dims" style="font-family:monospace; color:var(--accent, #6cf)">—</span>
+      </div>
+      <div class="hint">Use these exact dimensions for the now playing browser source (see below).</div>
+    </div>
+
+    <!-- Album art -->
+    <div class="subsection">
+      <h3>album art</h3>
+      <div style="display:flex; gap:16px; margin-bottom:12px">
+        <div style="text-align:center">
+          <img id="albumart-square-preview"
+               src="" alt="square art"
+               style="width:96px;height:96px;object-fit:cover;border:1px solid var(--border,#1a2a1a);display:block">
+          <div class="hint" style="margin-top:4px">square</div>
+        </div>
+        <div style="text-align:center">
+          <img id="albumart-circle-preview"
+               src="" alt="circle art"
+               style="width:96px;height:96px;object-fit:cover;border-radius:50%;border:1px solid var(--border,#1a2a1a);display:block">
+          <div class="hint" style="margin-top:4px">circle</div>
+        </div>
+      </div>
+      <div class="field-row">
+        <label>size (px)</label>
+        <input type="number" id="albumart-size" data-path="overlay.albumart_size"
+               min="64" max="2048" step="64" style="max-width:100px">
+        <div class="hint">square dimensions for both endpoints</div>
+      </div>
+      <div class="hint">
+        These always serve the <em>current</em> track's art — no-cache, refreshes each request.
+        In OBS set the Browser Source to refresh every 5s if you want live updates.
+      </div>
+    </div>
+
+    <!-- Browser source URLs — all overlays together -->
+    <div class="subsection">
+      <h3>browser source urls</h3>
+      <div class="hint" style="margin-bottom:14px">
+        Add each as a Browser Source in OBS. All use port <span id="obs-port-hint2">8765</span>.
+      </div>
+
+      <div class="field-row">
+        <label>spectrogram</label>
+        <div style="display:flex; gap:8px; align-items:center; flex:1">
+          <input type="text" id="spec-obs-url" readonly
+                 style="flex:1; font-family:monospace; font-size:.85em; color:var(--dim)">
+          <button id="spec-obs-copy-btn">copy</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:10px">Updates when you switch presets. Recommended size: 1920×200.</div>
+
+      <div class="field-row">
+        <label>now playing</label>
+        <div style="display:flex; gap:8px; align-items:center; flex:1">
+          <input type="text" id="np-obs-url" readonly
+                 style="flex:1; font-family:monospace; font-size:.85em; color:var(--dim)">
+          <button id="np-obs-copy-btn">copy</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:10px">Size: match the OBS source size shown in text display settings above.</div>
+
+      <div class="field-row">
+        <label>album art (square)</label>
+        <div style="display:flex; gap:8px; align-items:center; flex:1">
+          <input type="text" id="albumart-square-url" readonly
+                 style="flex:1; font-family:monospace; font-size:.85em; color:var(--dim)">
+          <button id="albumart-square-copy">copy</button>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <label>album art (circle)</label>
+        <div style="display:flex; gap:8px; align-items:center; flex:1">
+          <input type="text" id="albumart-circle-url" readonly
+                 style="flex:1; font-family:monospace; font-size:.85em; color:var(--dim)">
+          <button id="albumart-circle-copy">copy</button>
+        </div>
+      </div>
+      <div class="hint">Album art always serves the current track — no-cache, refreshes each request.</div>
+    </div>
+  </section>
+
+  <!-- ── Local Data ── -->
+  <section class="section" id="local-data">
+    <h2>local data</h2>
+
+    <!-- Data directory -->
+    <div class="field-row">
+      <label>data folder</label>
+      <div>
+        <div id="data-dir-path" style="font-family:monospace;font-size:11px;color:var(--text);padding:6px 8px;background:var(--input-bg,rgba(255,255,255,.06));border:1px solid var(--border);border-radius:4px;word-break:break-all;min-height:28px"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="open-data-dir-btn">Open folder</button>
+          <button id="migrate-data-dir-btn">Move…</button>
+        </div>
+        <div class="hint" style="margin-top:6px">
+          All playlists, settings, tokens, and the PySide6 library live here.
+          Use <strong>Move…</strong> to copy everything to a new location —
+          MusicHat will ask you to restart after the copy finishes.
+        </div>
+        <div id="migrate-status" style="display:none;margin-top:8px;font-size:12px"></div>
+      </div>
+    </div>
+
+    <!-- App version -->
+    <div class="field-row" style="margin-top:4px">
+      <label>app version</label>
+      <div>
+        <span id="app-version" style="font-family:monospace;font-size:12px;color:var(--text-muted,#9ca3af)">—</span>
+        <button id="check-update-btn" style="margin-left:12px;font-size:11px;padding:3px 10px">check for updates</button>
+        <span id="check-update-status" class="hint" style="margin-left:8px;margin-top:0;display:inline"></span>
+      </div>
+    </div>
+
+    <!-- PySide6 version -->
+    <div class="field-row" style="margin-top:4px">
+      <label>PySide6 version</label>
+      <div>
+        <span id="pyside6-version" style="font-family:monospace;font-size:12px;color:var(--text-muted,#9ca3af)">—</span>
+        <div class="hint" style="margin-top:4px">
+          The UI library stored in your data folder.  You can replace the
+          <code>pyside6/</code> subfolder with any compatible PySide6 build.
+        </div>
+      </div>
+    </div>
+
+    <!-- Clear data -->
+    <div class="field-row" style="margin-top:16px">
+      <label>clear data</label>
+      <div>
+        <button class="danger" id="reset-data-btn">Clear all data</button>
+        <div class="hint" style="margin-top:6px">
+          Removes all saved config, tokens, and credentials. The app keeps
+          running so you can set everything up fresh — nothing is sent
+          externally.
+        </div>
+      </div>
+    </div>
+
+    <!-- Remove and exit -->
+    <div class="field-row" style="margin-top:4px">
+      <label>remove &amp; exit</label>
+      <div>
+        <button class="danger" id="wipe-exit-btn">Remove &amp; exit</button>
+        <div class="hint" style="margin-top:6px">
+          Wipes all local data — config, tokens, and keys — then closes the
+          app entirely. Nothing will remain on disk or in the OS credential
+          store.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Spacer so the last nav item can scroll up to the top of the viewport
+       and activate the scroll-spy highlight correctly. -->
+  <div style="height:80vh; pointer-events:none;" aria-hidden="true"></div>
+
+</div><!-- #main -->
+
+<!-- ── One-time consent overlay ── -->
+<div id="consent-overlay" role="dialog" aria-modal="true">
+  <div id="consent-box">
+    <h2>standalone mode</h2>
+    <p>
+      Looks like you're running in standalone mode. Sign-in is proxied through
+      a service I set up so you don't need to register your own Twitch app —
+      your credentials never leave your machine.
+      <a href="https://github.com/XWhite-Hat/musichat/blob/main/PROXY_AUTH.md"
+         target="_blank" rel="noopener">learn more &rarr;</a>
+    </p>
+    <label class="consent-check" for="consent-checkbox">
+      <input type="checkbox" id="consent-checkbox">
+      I understand
+    </label>
+    <button id="consent-confirm-btn" class="accent" disabled>continue</button>
+  </div>
+</div>
+
+<!-- ── Post-consent info popover ── -->
+<div id="consent-popover" role="dialog">
+  <div id="consent-popover-box">
+    <h3>auth info</h3>
+    <p>
+      Sign-in is proxied through
+      <strong id="popover-worker-url" style="color:var(--text)">musicauth.xwhitehat.dev</strong>.
+      <a href="https://github.com/XWhite-Hat/musichat/blob/main/PROXY_AUTH.md"
+         target="_blank" rel="noopener">learn more &rarr;</a>
+    </p>
+    <button id="consent-popover-close" onclick="closeConsentPopover()">close</button>
+  </div>
+</div>
+
+<!-- ── Bot sign-in URL overlay ── -->
+<!-- Bot accounts must be signed in from a separate browser session — if you
+     just click the link here it auto-signs in whatever Twitch account is
+     already active in this browser (almost certainly your streamer account). -->
+<div id="bot-url-overlay" role="dialog" aria-modal="true">
+  <div id="bot-url-box">
+    <h2>sign in your bot account</h2>
+    <p>
+      Don't click this link directly — it'll sign in whichever Twitch account
+      is already active in this browser, which is almost certainly your
+      streamer account.
+    </p>
+    <p>
+      Instead, copy the link below and open it in a
+      <strong style="color:var(--text)">new incognito/private window</strong>
+      (or a different browser) where your bot account is signed in to Twitch.
+    </p>
+    <div style="display:flex; gap:8px; margin:14px 0;">
+      <input type="text" id="bot-url-input" readonly
+             style="flex:1; font-size:11px; color:var(--dim);">
+      <button id="bot-url-copy-btn" class="accent" style="white-space:nowrap">
+        copy link
+      </button>
+    </div>
+    <p style="font-size:11px; color:var(--dim); margin-bottom:14px;">
+      This page will update automatically once you've signed in.
+    </p>
+    <button id="bot-url-cancel-btn" style="width:100%">cancel</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- ── Removal confirm overlay ── -->
+<div id="removal-overlay" role="dialog" aria-modal="true">
+  <div id="removal-box">
+    <h3 id="removal-box-title"></h3>
+    <p  id="removal-box-body"></p>
+    <label id="wipe-pyside6-row" style="display:none;align-items:center;gap:8px;margin-bottom:14px;font-size:12px;color:var(--text);cursor:pointer">
+      <input type="checkbox" id="wipe-pyside6-check" checked>
+      Also remove the PySide6 library (~150 MB — requires re-download on next launch)
+    </label>
+    <div class="removal-actions">
+      <button id="removal-cancel-btn">Cancel</button>
+      <button class="danger" id="removal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let config   = {};
+let status   = {};
+let ws;
+
+// Which preset is currently open in the editor panel.
+// This is decoupled from config.active_preset_name (which controls the in-app
+// preview) — changing the dropdown in settings edits a preset without affecting
+// what the app is currently rendering.
+let _editingPresetName = null;
+let saveTimer;
+let pendingPatches = {};
+let _pendingAuthAccount = null;   // auth waiting on consent
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+async function boot() {
+  await Promise.all([loadConfig(), loadStatus()]);
+  await Promise.all([loadDevices(), loadTunnelStatus()]);
+  connectWS();
+  bindNav();
+  bindInputs();
+  updateAuthUI();
+}
+
+// ── Stale-session overlay ──────────────────────────────────────────────────────
+// Called when the page can no longer reach the host process (server restarted,
+// token expired, etc.).  Replaces the body so the user gets a clear message
+// rather than a broken/half-loaded settings page.
+let _sessionDead = false;
+let _wsReconnectFails = 0;
+function showStaleSession() {
+  if (_sessionDead) return;
+  _sessionDead = true;
+  // Use document.open/write to replace the whole document — replacing only
+  // body.innerHTML leaves the original <body> CSS rules in place (sidebar
+  // layout, flex, padding) which pushes the new content off-centre.
+  document.open();
+  document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings — Disconnected</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0e0e0e;color:#e0e0e0;font-family:system-ui,sans-serif;
+     display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{text-align:center;padding:40px 48px;background:#1a1a1a;
+      border:1px solid #333;border-radius:8px;max-width:440px}
+h1{font-size:17px;font-weight:600;margin-bottom:12px;color:#fff}
+p{font-size:13px;color:#888;line-height:1.7}
+strong{color:#ccc}
+.btn{display:inline-block;margin-top:20px;padding:7px 18px;background:transparent;
+     border:1px solid #555;border-radius:4px;color:#aaa;font-size:13px;
+     cursor:pointer;font-family:inherit}
+.btn:hover{border-color:#888;color:#fff}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Settings disconnected</h1>
+  <p>The app is no longer reachable from this tab — it may have restarted.<br>
+     Close this tab and click <strong>&gt; settings</strong>
+     in the player window to open a fresh session.</p>
+  <button class="btn" onclick="window.close()">Close tab</button>
+</div>
+</body>
+</html>`);
+  document.close();
+}
+
+// ── API ────────────────────────────────────────────────────────────────────────
+// NOTE: api() does NOT call showStaleSession() — any transient failure on a
+// background call (device query, tunnel status, etc.) would wrongly replace the
+// whole page.  Stale-session detection is handled by boot().catch() for the
+// initial load and by the WS reconnect loop for post-load server loss.
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t}`); }
+  return r.json();
+}
+
+async function loadConfig() {
+  config = await api('GET', '/api/config');
+  populateAllFields();
+  _botSettingsBaseHash = computeBotHash(config);
+}
+
+async function loadStatus() {
+  status = await api('GET', '/api/status');
+  updateAuthUI();
+}
+
+async function loadTunnelStatus() {
+  try {
+    const t = await api('GET', '/api/tunnel/status');
+    setTunnelStatus(t.url || null, !!t.online);
+  } catch {}
+}
+
+async function loadDevices() {
+  try {
+    const { devices, current } = await api('GET', '/api/devices');
+    const sel = document.getElementById('audio-device');
+    sel.innerHTML = '<option value="">system default</option>';
+    for (const d of (devices || [])) {
+      const opt = document.createElement('option');
+      opt.value = d.index;
+      opt.textContent = `${d.name} (${d.channels}ch)${d.default ? ' ★' : ''}`;
+      if (current === d.index) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    if (current === null || current === undefined) sel.value = '';
+  } catch(e) { console.warn('devices load failed', e); }
+}
+
+function updateCpStatus() {
+  const enabled  = config.twitch?.channel_points_enabled  || false;
+  const rewardId = config.twitch?.channel_points_reward_id || '';
+  const checkbox = document.getElementById('cp-enabled');
+  const infoEl   = document.getElementById('cp-reward-info');
+  const idEl     = document.getElementById('cp-reward-id');
+  const linkEl   = document.getElementById('cp-dashboard-link');
+  if (checkbox) checkbox.checked = enabled;
+  if (infoEl)  infoEl.style.display = (enabled && rewardId) ? 'block' : 'none';
+  if (idEl)    idEl.textContent = rewardId ? `id: ${rewardId.slice(0, 8)}…` : '';
+  if (linkEl) {
+    const user = status?.streamer_username || config.twitch?.streamer_username || '';
+    if (user) {
+      const dashUrl = `https://dashboard.twitch.tv/u/${user}/viewer-rewards/channel-points/rewards`;
+      linkEl.href = dashUrl;
+      linkEl.textContent = dashUrl;
+    } else {
+      linkEl.href = '#';
+      linkEl.textContent = 'Twitch dashboard → Viewer Rewards → Channel Points';
+    }
+  }
+}
+
+// ── Populate form fields ───────────────────────────────────────────────────────
+function populateAllFields() {
+  const flat = flattenConfig(config);
+  for (const [path, value] of Object.entries(flat)) setFieldValue(path, value);
+
+  renderTierTable();
+  renderCommandsTable();
+
+  const terms = config.twitch?.blacklist_terms || [];
+  const users = config.twitch?.blacklist_channels || [];
+  const ta = id => document.getElementById(id);
+  if (ta('blacklist-terms')) ta('blacklist-terms').value = terms.join('\n');
+  if (ta('blacklist-users')) ta('blacklist-users').value = users.join('\n');
+
+  renderPresetList();
+  updateTunnelFields();
+  updateCpStatus();
+  updateObsUrls();
+
+  // Populate NP template fields manually (no data-path — uses explicit Save buttons)
+  const npTmplEl = document.getElementById('np-template');
+  if (npTmplEl) npTmplEl.value = config.overlay?.nowplaying_template ?? '';
+  const npTmplReqEl = document.getElementById('np-template-requested');
+  if (npTmplReqEl) npTmplReqEl.value = config.overlay?.nowplaying_template_requested ?? '';
+
+  // Text display fields
+  const ov = config.overlay || {};
+  const colorEl = document.getElementById('text-color');
+  if (colorEl) colorEl.value = ov.text_color || '#ffffff';
+  const scrollEl = document.getElementById('text-scroll');
+  if (scrollEl) scrollEl.checked = !!ov.text_scroll;
+  _populateFontDropdown(ov.text_font || 'Share Tech Mono', ov.text_font_import || '');
+  _updateTextDimensions();
+
+  const useSepBot = config.twitch?.use_separate_bot || false;
+  document.getElementById('bot-section').style.display = useSepBot ? 'block' : 'none';
+
+  updateRangeDisplays();
+  updateGradientPreview();
+}
+
+function flattenConfig(obj, prefix = '') {
+  const result = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      Object.assign(result, flattenConfig(v, key));
+    } else {
+      result[key] = v;
+    }
+  }
+  return result;
+}
+
+// ── Text overlay helpers ───────────────────────────────────────────────────────
+
+// Preset font definitions: display name → { family (CSS), import (URL or '') }
+const _FONT_PRESETS = {
+  'Share Tech Mono': {
+    family: 'Share Tech Mono',
+    import: 'https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap',
+  },
+  'Arial':        { family: 'Arial',         import: '' },
+  'Georgia':      { family: 'Georgia',        import: '' },
+  'Verdana':      { family: 'Verdana',        import: '' },
+  'Trebuchet MS': { family: 'Trebuchet MS',   import: '' },
+  'Courier New':  { family: 'Courier New',    import: '' },
+  'Impact':       { family: 'Impact',         import: '' },
+  'Oswald': {
+    family: 'Oswald',
+    import: 'https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap',
+  },
+  'Roboto': {
+    family: 'Roboto',
+    import: 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap',
+  },
+  'Press Start 2P': {
+    family: 'Press Start 2P',
+    import: 'https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap',
+  },
+};
+
+function _populateFontDropdown(currentFont, currentImport) {
+  const sel = document.getElementById('text-font-select');
+  if (!sel) return;
+
+  if (currentImport && currentImport.startsWith('data:')) {
+    // Saved local font — show the local row
+    sel.value = '__local__';
+    _onFontPresetChange('__local__', false);
+    const lbl = document.getElementById('local-font-filename');
+    if (lbl) lbl.textContent = currentFont ? `loaded: ${currentFont}` : 'font loaded from file';
+    return;
+  }
+
+  const presetKey = Object.keys(_FONT_PRESETS).find(k => _FONT_PRESETS[k].family === currentFont);
+  sel.value = presetKey || 'Custom';
+  _onFontPresetChange(sel.value, false);
+  if (!presetKey) {
+    const nameEl   = document.getElementById('text-font-name-input');
+    const importEl = document.getElementById('text-font-import-input');
+    if (nameEl)   nameEl.value   = currentFont   || '';
+    if (importEl) importEl.value = currentImport || '';
+  }
+}
+
+async function _onFontPresetChange(presetKey, doSave = true) {
+  const customRow     = document.getElementById('custom-font-row');
+  const customNameRow = document.getElementById('custom-font-name-row');
+  const localRow      = document.getElementById('local-font-row');
+  const show = (el, v) => { if (el) el.style.display = v ? '' : 'none'; };
+
+  show(customRow,     presetKey === 'Custom');
+  show(customNameRow, presetKey === 'Custom');
+  show(localRow,      presetKey === '__local__');
+
+  if (doSave && presetKey !== 'Custom' && presetKey !== '__local__' && _FONT_PRESETS[presetKey]) {
+    const { family, import: imp } = _FONT_PRESETS[presetKey];
+    await patch('overlay.text_font',        family);
+    await patch('overlay.text_font_import', imp);
+  }
+}
+
+async function _saveCustomFont() {
+  const nameEl   = document.getElementById('text-font-name-input');
+  const importEl = document.getElementById('text-font-import-input');
+  const family   = nameEl?.value.trim()   || '';
+  const imp      = importEl?.value.trim() || '';
+  if (!family) { toast('enter a font name', 'error'); return; }
+  await patch('overlay.text_font',        family);
+  await patch('overlay.text_font_import', imp);
+  toast('custom font saved', 'ok');
+}
+
+function _pickLocalFont() {
+  document.getElementById('local-font-file-input')?.click();
+}
+
+async function _onLocalFontFileChanged(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  // Derive family name from filename (strip extension)
+  const family = file.name.replace(/\.[ot]tf$/i, '');
+  const lbl    = document.getElementById('local-font-filename');
+  if (lbl) lbl.textContent = 'loading…';
+  try {
+    const dataUri = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload  = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await patch('overlay.text_font',        family);
+    await patch('overlay.text_font_import', dataUri);
+    if (lbl) lbl.textContent = `loaded: ${file.name}`;
+    toast('local font saved', 'ok');
+  } catch (e) {
+    if (lbl) lbl.textContent = 'error reading file';
+    toast('failed to read font file', 'error');
+  }
+  // Reset so the same file can be re-selected if needed
+  input.value = '';
+}
+
+function _updateTextDimensions() {
+  // Read live from the DOM inputs so the readout updates immediately on change,
+  // before the debounced patch has flushed back into the config object.
+  const fsEl     = document.querySelector('[data-path="overlay.text_font_size"]');
+  const wEl      = document.querySelector('[data-path="overlay.text_width"]');
+  const fontSize = parseInt(fsEl ? fsEl.value : (config.overlay || {}).text_font_size || 22, 10);
+  const width    = parseInt(wEl  ? wEl.value  : (config.overlay || {}).text_width    || 600, 10);
+  const height   = Math.ceil(fontSize * 1.4) + 12;
+  const el = document.getElementById('obs-text-dims');
+  if (el) el.textContent = `${width} × ${height} px`;
+}
+
+// Wire font dropdown
+document.getElementById('text-font-select')?.addEventListener('change', function () {
+  _onFontPresetChange(this.value, true);
+});
+
+// Wire color picker — save on change (debounced slightly to avoid hammering on drag)
+let _colorSaveTimer = null;
+document.getElementById('text-color')?.addEventListener('input', function () {
+  clearTimeout(_colorSaveTimer);
+  _colorSaveTimer = setTimeout(() => patch('overlay.text_color', this.value), 400);
+});
+
+// Recompute OBS dimensions whenever font-size or width inputs change (live).
+// Reading directly from the DOM means no dependency on the debounced patch.
+document.addEventListener('input', e => {
+  if (e.target?.dataset?.path === 'overlay.text_font_size' ||
+      e.target?.dataset?.path === 'overlay.text_width') {
+    _updateTextDimensions();
+  }
+});
+
+function setFieldValue(path, value) {
+  const el = document.querySelector(`[data-path="${path}"]`);
+  if (!el) return;
+  if (el.type === 'checkbox') el.checked = !!value;
+  else if (el.type === 'range' || el.type === 'number') el.value = value;
+  else if (el.tagName === 'SELECT') el.value = String(value);
+  else el.value = value != null ? String(value) : '';
+}
+
+// ── Tier table ─────────────────────────────────────────────────────────────────
+const TIERS = [
+  { key: 'tier_head_mod',   label: 'head mod' },
+  { key: 'tier_mod',        label: 'mod' },
+  { key: 'tier_vip',        label: 'vip' },
+  { key: 'tier_subscriber', label: 'subscriber' },
+  { key: 'tier_viewer',     label: 'viewer' },
+];
+
+function renderTierTable() {
+  const tbody = document.getElementById('tier-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  for (const tier of TIERS) {
+    const t = config.twitch?.[tier.key] || {};
+    const p = f => `twitch.${tier.key}.${f}`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="tier-label">${tier.label}</td>
+      <td><input type="checkbox" data-path="${p('can_request')}" ${t.can_request ? 'checked' : ''}></td>
+      <td><input type="number"   data-path="${p('queue_limit')}"       value="${t.queue_limit      ?? 5}" min="0" max="50"></td>
+      <td><input type="number"   data-path="${p('cooldown_seconds')}"  value="${t.cooldown_seconds ?? 0}" min="0" max="3600"></td>
+      <td><input type="number"   data-path="${p('max_per_stream')}"    value="${t.max_per_stream   ?? 0}" min="0" max="200" title="0 = unlimited"></td>
+    `;
+    tbody.appendChild(tr);
+  }
+  bindInputsInside(tbody);
+}
+
+// ── Commands & aliases ─────────────────────────────────────────────────────────
+
+const COMMAND_DEFS = [
+  { name: 'songrequest', defaults: ['sr', 'request'],            desc: 'Request a song by URL or search query' },
+  { name: 'queue',       defaults: ['q'],                         desc: 'Show the current queue (up to 5 tracks)' },
+  { name: 'skip',        defaults: [],                            desc: 'Skip the current song (mod / broadcaster)' },
+  { name: 'currentsong', defaults: ['song', 'np'],               desc: "Show what's currently playing" },
+  { name: 'wrongsong',   defaults: ['remove', 'cancelsong', 'whoops'], desc: 'Remove your last queued request' },
+];
+
+function renderCommandsTable() {
+  const wrap = document.getElementById('commands-table-wrap');
+  if (!wrap) return;
+  const aliases = config.twitch?.command_aliases || {};
+  const prefix  = config.twitch?.prefix || '!';
+  wrap.innerHTML = '';
+
+  for (const cmd of COMMAND_DEFS) {
+    const customAliases = Array.isArray(aliases[cmd.name]) ? aliases[cmd.name] : [];
+
+    const div = document.createElement('div');
+    div.className = 'cmd-row';
+
+    const defaultChips = cmd.defaults.map(a =>
+      `<span class="alias-chip alias-default">${prefix}${a}</span>`
+    ).join('');
+    const customChips = customAliases.map(a =>
+      `<span class="alias-chip alias-custom">${prefix}${a}<button class="alias-rm" data-cmd="${cmd.name}" data-alias="${a}" title="remove alias">×</button></span>`
+    ).join('');
+
+    div.innerHTML = `
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <span class="cmd-name">${prefix}${cmd.name}</span>
+        <span class="cmd-desc">${cmd.desc}</span>
+      </div>
+      <div class="alias-chips">
+        ${defaultChips}
+        ${customChips}
+        <form class="alias-add-form" data-cmd="${cmd.name}">
+          <span class="alias-prefix-tip">No prefix needed — just the alias name</span>
+          <input type="text" class="alias-add-input" placeholder="alias name" autocomplete="off">
+          <button type="submit" class="alias-add-btn">+ add</button>
+        </form>
+      </div>`;
+    wrap.appendChild(div);
+  }
+
+  // Remove alias
+  wrap.querySelectorAll('.alias-rm').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const cmdName = btn.dataset.cmd;
+      const alias   = btn.dataset.alias;
+      const updated = { ...(config.twitch?.command_aliases || {}) };
+      updated[cmdName] = (updated[cmdName] || []).filter(a => a !== alias);
+      await patch('twitch.command_aliases', updated);
+      if (config.twitch) config.twitch.command_aliases = updated;
+      renderCommandsTable();
+    });
+  });
+
+  // Show speech-bubble tip when user types the prefix into an alias input
+  wrap.querySelectorAll('.alias-add-input').forEach(input => {
+    const tip = input.parentElement.querySelector('.alias-prefix-tip');
+    input.addEventListener('input', () => {
+      if (!tip) return;
+      const pfx = config.twitch?.prefix || '!';
+      const val = input.value;
+      tip.classList.toggle('visible', val.length > 0 && val.startsWith(pfx));
+    });
+    input.addEventListener('blur', () => { if (tip) tip.classList.remove('visible'); });
+  });
+
+  // Add alias
+  wrap.querySelectorAll('.alias-add-form').forEach(form => {
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const cmdName = form.dataset.cmd;
+      const input   = form.querySelector('.alias-add-input');
+      // Strip any leading prefix the user may have typed (e.g. "!" or whatever prefix is set)
+      const cfgPrefix = (config.twitch?.prefix || '!').replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+      const raw = (input.value || '').trim().toLowerCase()
+        .replace(new RegExp('^' + cfgPrefix), '')
+        .replace(/^!/, '');  // belt-and-suspenders strip of literal !
+      if (!raw) return;
+
+      if (!/^[a-z0-9_]+$/.test(raw)) {
+        toast('alias must contain only letters, numbers, or underscores', 'err'); return;
+      }
+
+      // Check for conflicts with existing command names and built-in aliases
+      const allBuiltinNames  = COMMAND_DEFS.map(c => c.name);
+      const allBuiltinAliases = COMMAND_DEFS.flatMap(c => c.defaults);
+      if (allBuiltinNames.includes(raw) || allBuiltinAliases.includes(raw)) {
+        toast(`"${raw}" conflicts with a built-in command or alias`, 'err'); return;
+      }
+
+      // Check for conflicts with other custom aliases
+      const current = { ...(config.twitch?.command_aliases || {}) };
+      const allCustom = Object.values(current).flat();
+      if (allCustom.includes(raw)) {
+        toast(`"${raw}" is already assigned to another command`, 'err'); return;
+      }
+
+      if (!current[cmdName]) current[cmdName] = [];
+      current[cmdName] = [...current[cmdName], raw];
+      await patch('twitch.command_aliases', current);
+      if (config.twitch) config.twitch.command_aliases = current;
+      input.value = '';
+      renderCommandsTable();
+    });
+  });
+}
+
+// ── Spectrogram presets ────────────────────────────────────────────────────────
+function renderPresetList() {
+  const sel = document.getElementById('preset-select');
+  if (!sel) return;
+  const presets = config.spectrogram_presets || [];
+
+  // On first load, start editing whichever preset is currently active.
+  // After that, preserve whichever preset the user last selected in the dropdown
+  // (so reloading config for other reasons doesn't jump you away mid-edit).
+  if (!_editingPresetName || !presets.find(p => p.name === _editingPresetName)) {
+    _editingPresetName = config.active_preset_name || (presets[0] || {}).name || null;
+  }
+
+  sel.innerHTML = '';
+  for (const p of presets) {
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = p.name;
+    if (p.name === _editingPresetName) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  const preset = presets.find(p => p.name === _editingPresetName) || presets[0] || {};
+  populatePresetEditor(preset);
+}
+
+function populatePresetEditor(preset) {
+  const fields = [
+    'color_start','color_mid','color_end','background_color','background_alpha',
+    'bar_count','bar_gap','bar_min_height','freq_min','freq_max','smoothing',
+    'peak_hold','peak_hold_frames',
+    'cover_art_match',
+    // camber_degrees handled by shape selector; double_sided/inverted by feature dropdown
+    'camber_asymmetric',
+    'obs_width','obs_height',
+  ];
+  for (const f of fields) {
+    const el = document.querySelector(`[data-path="spectrogram.${f}"]`);
+    if (!el || preset[f] === undefined) continue;
+    if (el.type === 'checkbox') el.checked = !!preset[f];
+    else el.value = preset[f];
+  }
+  // Sync the cover-art-match UI visibility for the freshly-loaded preset
+  _setCoverArtMatchUI(!!(preset.cover_art_match));
+  updateGradientPreview();
+  updateRangeDisplays();
+  syncShapeFromPreset(preset);
+  const featSel = document.getElementById('feature-select');
+  if (featSel) featSel.value = featureFromPreset(preset);
+  updateObsMinHint();
+}
+
+document.getElementById('preset-select')?.addEventListener('change', e => {
+  // Update which preset the editor panel is targeting — do NOT patch
+  // active_preset_name here.  That would change the in-app preview and
+  // the FFT pipeline just because the user opened another preset to edit.
+  // The in-app preview is controlled separately (via the combo in the Qt UI).
+  _editingPresetName = e.target.value;
+  const preset = (config.spectrogram_presets || []).find(p => p.name === _editingPresetName);
+  if (preset) populatePresetEditor(preset);
+  updateObsUrls();
+});
+
+document.getElementById('preset-new-btn')?.addEventListener('click', async () => {
+  const name = prompt('New preset name:');
+  if (!name?.trim()) return;
+  const copyFrom = document.getElementById('preset-select')?.value || null;
+  try {
+    const result = await api('POST', '/api/spectrogram/presets', {
+      name: name.trim(), copy_from: copyFrom,
+    });
+    await loadConfig();
+    toast(`Preset "${result.name}" created`, 'ok');
+  } catch(e) { toast(`Could not create: ${e.message}`, 'error'); }
+});
+
+document.getElementById('preset-rename-btn')?.addEventListener('click', async () => {
+  const current = document.getElementById('preset-select')?.value;
+  if (!current) return;
+  const newName = prompt(`Rename "${current}" to:`, current);
+  if (!newName?.trim() || newName.trim() === current) return;
+  try {
+    const result = await api('PATCH', `/api/spectrogram/presets/${encodeURIComponent(current)}`, {
+      new_name: newName.trim(),
+    });
+    _editingPresetName = result.name;
+    await loadConfig();
+    toast(`Preset renamed to "${result.name}"`, 'ok');
+  } catch(e) { toast(`Could not rename: ${e.message}`, 'error'); }
+});
+
+document.getElementById('preset-delete-btn')?.addEventListener('click', async () => {
+  const name = document.getElementById('preset-select')?.value;
+  if (!name) return;
+  if ((config.spectrogram_presets || []).length <= 1) {
+    toast('Cannot delete the last preset', 'error'); return;
+  }
+  if (!confirm(`Delete preset "${name}"?`)) return;
+  try {
+    await api('DELETE', `/api/spectrogram/presets/${encodeURIComponent(name)}`);
+    await loadConfig();
+    toast('Preset deleted', 'ok');
+  } catch(e) { toast(`Could not delete: ${e.message}`, 'error'); }
+});
+
+// ── Consent flow ───────────────────────────────────────────────────────────────
+function needsConsent() {
+  return !status.byoi_mode && !config.twitch?.proxied_consent_given;
+}
+
+function showConsentOverlay(account) {
+  _pendingAuthAccount = account;
+  document.getElementById('consent-overlay').classList.add('visible');
+}
+function hideConsentOverlay() {
+  document.getElementById('consent-overlay').classList.remove('visible');
+  _pendingAuthAccount = null;
+}
+function openConsentPopover() {
+  const el = document.getElementById('popover-worker-url');
+  if (el && status.worker_url) el.textContent = status.worker_url;
+  document.getElementById('consent-popover').classList.add('visible');
+}
+function closeConsentPopover() {
+  document.getElementById('consent-popover').classList.remove('visible');
+}
+
+document.getElementById('consent-checkbox')?.addEventListener('change', e => {
+  document.getElementById('consent-confirm-btn').disabled = !e.target.checked;
+});
+
+document.getElementById('consent-confirm-btn')?.addEventListener('click', async () => {
+  const account = _pendingAuthAccount;
+  hideConsentOverlay();
+  // Reset the checkbox for next time (shouldn't be shown again, but just in case)
+  const cb = document.getElementById('consent-checkbox');
+  if (cb) { cb.checked = false; }
+  document.getElementById('consent-confirm-btn').disabled = true;
+
+  try {
+    await api('POST', '/api/auth/proxied-consent');
+    if (config.twitch) config.twitch.proxied_consent_given = true;
+  } catch(e) { console.warn('consent record failed', e); }
+
+  updateAuthUI();
+  if (account) await beginAuth(account);
+});
+
+// Click outside box to dismiss
+document.getElementById('consent-overlay')?.addEventListener('click', e => {
+  if (e.target.id === 'consent-overlay') hideConsentOverlay();
+});
+document.getElementById('consent-popover')?.addEventListener('click', e => {
+  if (e.target.id === 'consent-popover') closeConsentPopover();
+});
+
+// ── Auth UI ────────────────────────────────────────────────────────────────────
+function updateAuthUI() {
+  const byoi         = status.byoi_mode;
+  const consentGiven = byoi || config.twitch?.proxied_consent_given;
+
+  // Streamer
+  const sStatus    = document.getElementById('streamer-status');
+  const sSignIn    = document.getElementById('streamer-signin-btn');
+  const sSignOut   = document.getElementById('streamer-signout-btn');
+  const sInfoLink  = document.getElementById('streamer-consent-link');
+  const sUsername  = status.streamer_username || config.twitch?.streamer_username || '';
+
+  if (sUsername) {
+    sStatus.textContent  = `signed in as ${sUsername}`;
+    sStatus.className    = 'signed-in';
+    sSignIn.style.display  = 'none';
+    sSignOut.style.display = '';
+  } else {
+    sStatus.textContent  = 'not signed in';
+    sStatus.className    = 'signed-out';
+    sSignIn.style.display  = '';
+    sSignOut.style.display = 'none';
+  }
+  if (sInfoLink) sInfoLink.style.display = (!byoi && consentGiven) ? '' : 'none';
+
+  // Bot
+  const bStatus   = document.getElementById('bot-status');
+  const bSignIn   = document.getElementById('bot-signin-btn');
+  const bSignOut  = document.getElementById('bot-signout-btn');
+  const bInfoLink = document.getElementById('bot-consent-link');
+  const bName     = status.bot_username || config.twitch?.bot_username || '';
+
+  if (bStatus) {
+    if (bName) {
+      bStatus.textContent  = `signed in as ${bName}`;
+      bStatus.className    = 'signed-in';
+      if (bSignIn)  bSignIn.style.display  = 'none';
+      if (bSignOut) bSignOut.style.display = '';
+    } else {
+      bStatus.textContent  = 'no bot account set';
+      bStatus.className    = 'signed-out';
+      if (bSignIn)  bSignIn.style.display  = '';
+      if (bSignOut) bSignOut.style.display = 'none';
+    }
+    if (bInfoLink) bInfoLink.style.display = (!byoi && consentGiven) ? '' : 'none';
+  }
+
+  updateSignInGating();
+}
+
+function updateSignInGating() {
+  const signedIn = !!(status.streamer_username || config.twitch?.streamer_username);
+  const gated = document.getElementById('streamer-gated');
+  if (gated) gated.style.display = signedIn ? '' : 'none';
+  const serverSection = document.getElementById('server');
+  if (serverSection) serverSection.style.display = signedIn ? '' : 'none';
+  const serverNav = document.getElementById('server-nav-item');
+  if (serverNav) serverNav.style.display = signedIn ? '' : 'none';
+}
+
+// ── Bot URL overlay helpers ───────────────────────────────────────────────────
+function showBotUrlOverlay(url) {
+  const input = document.getElementById('bot-url-input');
+  if (input) input.value = url;
+  document.getElementById('bot-url-overlay').classList.add('visible');
+}
+function hideBotUrlOverlay() {
+  document.getElementById('bot-url-overlay').classList.remove('visible');
+}
+
+document.getElementById('bot-url-copy-btn')?.addEventListener('click', async () => {
+  const url = document.getElementById('bot-url-input')?.value || '';
+  try {
+    await navigator.clipboard.writeText(url);
+    const btn = document.getElementById('bot-url-copy-btn');
+    btn.textContent = 'copied!';
+    setTimeout(() => { btn.textContent = 'copy link'; }, 2000);
+  } catch(e) {
+    // clipboard API blocked (non-https?) — select text instead
+    document.getElementById('bot-url-input')?.select();
+  }
+});
+
+document.getElementById('bot-url-cancel-btn')?.addEventListener('click', async () => {
+  hideBotUrlOverlay();
+  // Cancel the pending auth session on the server so port 7329 is freed
+  const waitEl = document.getElementById('bot-waiting');
+  if (waitEl) waitEl.style.display = 'none';
+  try { await api('POST', '/api/auth/bot/revoke'); } catch(_) {}
+});
+
+document.getElementById('bot-url-overlay')?.addEventListener('click', e => {
+  if (e.target.id === 'bot-url-overlay') {
+    document.getElementById('bot-url-cancel-btn')?.click();
+  }
+});
+
+// ── Auth actions ───────────────────────────────────────────────────────────────
+async function beginAuth(account) {
+  if (needsConsent()) { showConsentOverlay(account); return; }
+
+  const waitEl = document.getElementById(`${account}-waiting`);
+  if (waitEl) waitEl.style.display = '';
+  try {
+    const { url } = await api('POST', `/api/auth/${account}/begin`);
+
+    if (account === 'bot') {
+      // Bot accounts must be signed in from a different browser session —
+      // auto-opening would sign in the streamer account that's already active.
+      showBotUrlOverlay(url);
+      toast('Copy the link and open it in incognito / a bot-account browser', 'warn');
+    } else {
+      window.open(url, '_blank');
+      toast('Browser tab opened — complete sign-in there', 'ok');
+    }
+  } catch(e) {
+    toast(`Auth error: ${e.message}`, 'error');
+    if (waitEl) waitEl.style.display = 'none';
+  }
+}
+
+async function revokeAuth(account) {
+  if (!confirm(`Sign out ${account} account?`)) return;
+  await api('POST', `/api/auth/${account}/revoke`);
+  if (account === 'streamer') {
+    status.streamer_username = '';
+    if (config.twitch) config.twitch.streamer_username = '';
+  } else {
+    status.bot_username = '';
+    if (config.twitch) config.twitch.bot_username = '';
+  }
+  updateAuthUI();
+  toast(`${account} signed out`, 'ok');
+}
+
+document.getElementById('streamer-signin-btn') ?.addEventListener('click', () => beginAuth('streamer'));
+document.getElementById('streamer-signout-btn')?.addEventListener('click', () => revokeAuth('streamer'));
+document.getElementById('bot-signin-btn')      ?.addEventListener('click', () => beginAuth('bot'));
+document.getElementById('bot-signout-btn')     ?.addEventListener('click', () => revokeAuth('bot'));
+
+// ── WebSocket ──────────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onmessage = e => {
+    if (e.data === 'pong') return;   // plain-text keepalive — not JSON
+    const msg = JSON.parse(e.data);
+    switch(msg.type) {
+      case 'auth_complete': {
+        if (msg.account === 'streamer') status.streamer_username = msg.success ? msg.username : '';
+        else                            status.bot_username      = msg.success ? msg.username : '';
+        const w = document.getElementById(`${msg.account}-waiting`);
+        if (w) w.style.display = 'none';
+        // Close bot URL overlay if it's still open
+        if (msg.account === 'bot') hideBotUrlOverlay();
+        updateAuthUI();
+        toast(msg.success ? `signed in as ${msg.username || '(fetching…)'}` : `sign-in failed: ${msg.error}`,
+              msg.success ? 'ok' : 'error');
+        // Re-fetch status from server — handles the case where msg.username was
+        // empty because the user-info call failed on the first attempt.
+        if (msg.success) {
+          loadStatus().catch(() => {});
+          // Clear re-auth banner if it was showing for this account
+          document.getElementById('reauth-banner')?.classList.remove('visible');
+        }
+        break;
+      }
+      case 'auth_revoked':
+        updateAuthUI();
+        break;
+      case 'config_changed': {
+        const { path: cp, value: cv, preset_name: cpn } = msg;
+        if (cp !== undefined && cv !== undefined) _applyRemoteChange(cp, cv, cpn);
+        break;
+      }
+      case 'preset_colours_updated': {
+        // Python extracted cover-art colours and applied them to one or more presets.
+        // Update in-memory config for all affected presets, then refresh the colour
+        // pickers if we're currently editing one of them.
+        const updates = msg.presets || {};
+        for (const [pname, colours] of Object.entries(updates)) {
+          const p = (config.spectrogram_presets || []).find(p => p.name === pname);
+          if (p) Object.assign(p, colours);
+        }
+        const myUpdate = updates[_editingPresetName];
+        if (myUpdate) {
+          for (const [field, val] of Object.entries(myUpdate)) {
+            const el = document.querySelector(`[data-path="spectrogram.${field}"]`);
+            if (el) el.value = val;
+          }
+          updateGradientPreview();
+        }
+        break;
+      }
+      case 'bot_status':
+        if (msg.connected) {
+          _botSettingsBaseHash = computeBotHash(config);
+          clearRestartState();
+        }
+        break;
+      case 'preset_created':
+      case 'preset_deleted':
+        loadConfig();
+        break;
+      case 'preset_renamed':
+        if (_editingPresetName === msg.old_name) _editingPresetName = msg.new_name;
+        loadConfig();
+        break;
+      case 'update_available': {
+        const banner  = document.getElementById('update-banner');
+        const msgEl   = document.getElementById('update-banner-msg');
+        const linkEl  = document.getElementById('update-release-link');
+        if (msgEl)  msgEl.textContent = `MusicHat v${msg.version} is available`;
+        if (linkEl) linkEl.href = 'https://github.com/xwhitehat/musichat/releases/latest';
+        if (banner) banner.classList.add('visible');
+        break;
+      }
+      case 'cp_reward_deleted':
+        // Bot detected the reward was deleted from the Twitch dashboard
+        if (config.twitch) {
+          config.twitch.channel_points_enabled   = false;
+          config.twitch.channel_points_reward_id = '';
+        }
+        document.getElementById('cp-warning').style.display = 'block';
+        updateCpStatus();
+        toast('channel points reward was deleted — re-check the box to create a new one', 'error');
+        break;
+      case 'reauth_required': {
+        const banner = document.getElementById('reauth-banner');
+        const msgEl  = document.getElementById('reauth-banner-msg');
+        const acct   = msg.account === 'bot' ? 'bot account' : 'streamer account';
+        if (msgEl) msgEl.textContent = `⚠ ${acct} token expired or revoked — sign in again to restore chat monitoring`;
+        if (banner) banner.classList.add('visible');
+        toast(`${acct} needs re-authentication`, 'error');
+        break;
+      }
+      case 'bot_auth_failed': {
+        const banner = document.getElementById('reauth-banner');
+        const msgEl  = document.getElementById('reauth-banner-msg');
+        const acct   = msg.account === 'bot' ? 'bot account' : 'streamer account';
+        if (msgEl) msgEl.textContent = `✕ ${acct} login failed — token is invalid. Please sign in again.`;
+        if (banner) banner.classList.add('visible');
+        toast(`${acct} login failed — please sign in again`, 'error');
+        break;
+      }
+      case 'tunnel_status':
+        setTunnelStatus(msg.url || null, !!msg.online, msg.error || null);
+        if (msg.online && msg.url) {
+          toast(`tunnel live: ${msg.url}`, 'ok');
+        } else if (msg.error) {
+          toast('tunnel error — see tunnel section for details', 'error');
+        }
+        break;
+      case 'data_reset':
+        if (typeof window._onDataReset === 'function') window._onDataReset();
+        break;
+      case 'data_migrated':
+        if (typeof window._onDataMigrated === 'function') window._onDataMigrated(msg);
+        break;
+      case 'data_migrate_error':
+        if (typeof window._onDataMigrateError === 'function') window._onDataMigrateError(msg);
+        break;
+    }
+    // Seed state from the init message (sent on every new WS connection)
+    if (msg.type === 'init') {
+      if (msg.tunnel) setTunnelStatus(msg.tunnel.url || null, !!msg.tunnel.online);
+      if (msg.status) { Object.assign(status, msg.status); updateAuthUI(); }
+    }
+  };
+
+  ws.onclose = () => setTimeout(async () => {
+    try {
+      await loadStatus();
+      _wsReconnectFails = 0;          // server responded — reset streak
+    } catch (_) {
+      _wsReconnectFails++;
+      if (_wsReconnectFails >= 4) {   // ~12 s of consecutive failures
+        showStaleSession();
+        return;                       // stop reconnecting
+      }
+    }
+    connectWS();
+  }, 3000);
+  setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 20000);
+}
+
+// ── OBS overlays ──────────────────────────────────────────────────────────────
+
+function obsPort() {
+  return config.server?.port || 8765;
+}
+
+function updateObsUrls() {
+  const port      = obsPort();
+  const preset    = config.active_preset_name || 'Main';
+  const specUrl   = `http://localhost:${port}/spectrogram/overlay?preset=${encodeURIComponent(preset)}`;
+  const npUrl     = `http://localhost:${port}/overlay/nowplaying`;
+  const sqUrl     = `http://localhost:${port}/albumart/square`;
+  const ciUrl     = `http://localhost:${port}/albumart/circle`;
+
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  setVal('spec-obs-url',       specUrl);
+  setVal('np-obs-url',         npUrl);
+  setVal('albumart-square-url', sqUrl);
+  setVal('albumart-circle-url', ciUrl);
+
+  // Port hints
+  const hint = document.getElementById('obs-port-hint');
+  if (hint) hint.textContent = port;
+  const hint2 = document.getElementById('obs-port-hint2');
+  if (hint2) hint2.textContent = port;
+
+  // Album art previews — use /raw (PNG) so the <img> tag gets actual image bytes,
+  // not the HTML wrapper page that is meant for OBS browser sources.
+  const ts = Date.now();
+  const sq = document.getElementById('albumart-square-preview');
+  const ci = document.getElementById('albumart-circle-preview');
+  if (sq) sq.src = `http://localhost:${port}/albumart/square/raw?t=${ts}`;
+  if (ci) ci.src = `http://localhost:${port}/albumart/circle/raw?t=${ts}`;
+}
+
+function copyObsUrl(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el || !el.value) return;
+  navigator.clipboard.writeText(el.value).then(() => toast('copied!', 'ok'));
+}
+
+// Preset copy-link button (in spectrogram section)
+document.getElementById('preset-copy-link-btn')?.addEventListener('click', () => {
+  const preset = document.getElementById('preset-select')?.value || config.active_preset_name || 'Main';
+  const port   = obsPort();
+  const url    = `http://localhost:${port}/spectrogram/overlay?preset=${encodeURIComponent(preset)}`;
+  navigator.clipboard.writeText(url).then(() => toast('browser source link copied!', 'ok'));
+});
+
+// Spec section copy button
+document.getElementById('spec-obs-copy-btn')?.addEventListener('click', () => copyObsUrl('spec-obs-url'));
+
+// Now playing copy + live preview poll
+document.getElementById('np-obs-copy-btn')?.addEventListener('click', () => copyObsUrl('np-obs-url'));
+
+async function refreshNpPreview() {
+  try {
+    const d = await api('GET', '/api/overlay/nowplaying');
+    const el = document.getElementById('np-preview');
+    if (el) el.textContent = d.current || '(nothing playing)';
+  } catch(_) {}
+}
+
+// NP template save — shared validation + save logic for both template inputs
+function _validateNpTemplate(value) {
+  // Attempt a dry-run substitution with dummy values to catch bad templates.
+  // Python's str.format() rejects '{' inside a field name.
+  const dummy = { title:'T', artist:'A', display:'D',
+                  requested_by:'R', source:'S', duration:'0:00' };
+  value.replace(/\{([^{}]*)\}/g, (_, key) => {
+    if (!(key in dummy)) throw new Error(`Unknown placeholder: {${key}}`);
+  });
+  // Also check for unmatched lone braces
+  if (/\{[^{]/.test(value.replace(/\{\{/g,'').replace(/\{(\w+)\}/g,'')) ||
+      /[^}]\}/.test(value.replace(/\}\}/g,'').replace(/\{(\w+)\}/g,''))) {
+    throw new Error('Unmatched { or } in template');
+  }
+}
+
+// Streamer-played songs template
+(function () {
+  const inp = document.getElementById('np-template');
+  const btn = document.getElementById('np-template-save');
+  if (!inp || !btn) return;
+
+  async function saveTemplate() {
+    const value = inp.value.trim() || '{display}';
+    try { _validateNpTemplate(value); } catch(e) {
+      toast(`bad template: ${e.message}`, 'error'); return;
+    }
+    await patch('overlay.nowplaying_template', value);
+    await refreshNpPreview();
+    toast('streamer template saved', 'ok');
+  }
+
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveTemplate(); });
+  btn.addEventListener('click', saveTemplate);
+})();
+
+// Viewer-requested songs template
+(function () {
+  const inp = document.getElementById('np-template-requested');
+  const btn = document.getElementById('np-template-requested-save');
+  if (!inp || !btn) return;
+
+  async function saveTemplate() {
+    const value = inp.value.trim() || '{display} — requested by @{requested_by}';
+    try { _validateNpTemplate(value); } catch(e) {
+      toast(`bad template: ${e.message}`, 'error'); return;
+    }
+    await patch('overlay.nowplaying_template_requested', value);
+    await refreshNpPreview();
+    toast('request template saved', 'ok');
+  }
+
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveTemplate(); });
+  btn.addEventListener('click', saveTemplate);
+})();
+
+// Album art copy buttons
+document.getElementById('albumart-square-copy')?.addEventListener('click', () => copyObsUrl('albumart-square-url'));
+document.getElementById('albumart-circle-copy')?.addEventListener('click', () => copyObsUrl('albumart-circle-url'));
+
+// Refresh album art previews every 5s when OBS section is visible
+let _artRefreshTimer = null;
+const _obsSection = document.getElementById('obs');
+if (_obsSection) {
+  const _obsObserver = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) {
+      updateObsUrls();
+      refreshNpPreview();
+      _artRefreshTimer = setInterval(() => {
+        const ts = Date.now();
+        const sq = document.getElementById('albumart-square-preview');
+        const ci = document.getElementById('albumart-circle-preview');
+        const port = obsPort();
+        if (sq) sq.src = `http://localhost:${port}/albumart/square/raw?t=${ts}`;
+        if (ci) ci.src = `http://localhost:${port}/albumart/circle/raw?t=${ts}`;
+        refreshNpPreview();
+      }, 5000);
+    } else {
+      if (_artRefreshTimer) { clearInterval(_artRefreshTimer); _artRefreshTimer = null; }
+    }
+  });
+  _obsObserver.observe(_obsSection);
+}
+
+// Keep spec-obs-url in sync when preset changes
+document.getElementById('preset-select')?.addEventListener('change', () => {
+  // Small delay — the patch is in-flight
+  setTimeout(updateObsUrls, 100);
+});
+
+// ── Channel points setup ───────────────────────────────────────────────────────
+// The cp-enabled checkbox is NOT wired via data-path because toggling it on
+// must call POST /api/twitch/channel-points/setup (which creates the Twitch
+// reward if needed) rather than a plain PATCH.  Toggling it off just disables.
+document.getElementById('cp-enabled')?.addEventListener('change', async function() {
+  const checked = this.checked;
+  const spinner = document.getElementById('cp-spinner');
+  const errEl   = document.getElementById('cp-error');
+  errEl.style.display = 'none';
+
+  if (checked) {
+    // Check streamer is signed in first
+    if (!(status.streamer_username || config.twitch?.streamer_username)) {
+      this.checked = false;
+      errEl.textContent = 'sign in with your streamer account first';
+      errEl.style.display = 'block';
+      return;
+    }
+    this.disabled = true;
+    spinner.style.display = 'inline';
+    try {
+      const result = await api('POST', '/api/twitch/channel-points/setup');
+      if (config.twitch) {
+        config.twitch.channel_points_enabled   = true;
+        config.twitch.channel_points_reward_id = result.reward_id;
+      }
+      document.getElementById('cp-warning').style.display = 'none';
+      updateCpStatus();
+      if (result.created) {
+        toast(`channel points reward created: "${result.reward_title}" (200 pts) — adjust on Twitch dashboard`, 'ok');
+      } else if (result.reward_id && result.reward_title) {
+        toast(`linked to existing "${result.reward_title}" reward — adjust cost & title on Twitch dashboard`, 'ok');
+      } else {
+        toast('channel points reward re-enabled', 'ok');
+      }
+    } catch(e) {
+      this.checked = false;
+      errEl.textContent = e.message || 'failed to create reward — check console';
+      errEl.style.display = 'block';
+    } finally {
+      this.disabled = false;
+      spinner.style.display = 'none';
+    }
+  } else {
+    // Disable — just a plain config PATCH
+    try {
+      await patch('twitch.channel_points_enabled', false);
+      if (config.twitch) config.twitch.channel_points_enabled = false;
+      updateCpStatus();
+    } catch(e) {
+      this.checked = true;  // rollback
+    }
+  }
+});
+
+// ── Input binding ──────────────────────────────────────────────────────────────
+function bindInputs() { bindInputsInside(document); }
+
+function bindInputsInside(root) {
+  root.querySelectorAll('[data-path]').forEach(el => {
+    if (el._bound) return;
+    el._bound = true;
+    const path = el.getAttribute('data-path');
+    const evt  = el.type === 'checkbox' ? 'change' : 'input';
+
+    el.addEventListener(evt, () => {
+      const value = el.type === 'checkbox'                        ? el.checked
+                  : (el.type === 'number' || el.type === 'range') ? Number(el.value)
+                  : el.value;
+
+      if (path === 'twitch.use_separate_bot')
+        document.getElementById('bot-section').style.display = value ? 'block' : 'none';
+      if (path === 'server.tunnel_mode') updateTunnelFields();
+      if (path === 'spectrogram.cover_art_match') {
+        _setCoverArtMatchUI(value);
+        const _presetKey = 'cover_art_prev:' + (_editingPresetName || config.active_preset_name || '');
+        if (value) {
+          // Turning ON — snapshot the current manual colours before auto-set overwrites them
+          const _s = document.getElementById('color-start')?.value;
+          const _m = document.getElementById('color-mid')?.value;
+          const _e = document.getElementById('color-end')?.value;
+          if (_s && _m && _e) {
+            try { localStorage.setItem(_presetKey, JSON.stringify({s:_s, m:_m, e:_e})); } catch(_) {}
+          }
+        } else {
+          // Turning OFF — restore snapshot
+          try {
+            const _saved = JSON.parse(localStorage.getItem(_presetKey) || 'null');
+            if (_saved?.s && _saved?.m && _saved?.e) {
+              const _pn = _editingPresetName;
+              const _extras = _pn ? { preset_name: _pn } : {};
+              const _cs = document.getElementById('color-start');
+              const _cm = document.getElementById('color-mid');
+              const _ce = document.getElementById('color-end');
+              if (_cs) _cs.value = _saved.s;
+              if (_cm) _cm.value = _saved.m;
+              if (_ce) _ce.value = _saved.e;
+              updateGradientPreview();
+              const _ep = (config.spectrogram_presets || []).find(
+                p => p.name === (_pn || config.active_preset_name)
+              );
+              if (_ep) { _ep.color_start = _saved.s; _ep.color_mid = _saved.m; _ep.color_end = _saved.e; }
+              schedulePatch('spectrogram.color_start', _saved.s, _extras);
+              schedulePatch('spectrogram.color_mid',   _saved.m, _extras);
+              schedulePatch('spectrogram.color_end',   _saved.e, _extras);
+            }
+          } catch(_) {}
+        }
+      }
+
+      if (path.startsWith('spectrogram.')) {
+        updateGradientPreview();
+        updateRangeDisplays();
+        const field = path.split('.')[1];
+        // Update in-memory config for the preset being edited (not necessarily
+        // the active one — these are decoupled).
+        const editName = _editingPresetName || config.active_preset_name;
+        const ap = (config.spectrogram_presets || []).find(p => p.name === editName);
+        if (ap) ap[field] = value;
+      }
+
+      // For spectrogram.* patches, tell the server which preset to write to.
+      // Without this, the server defaults to the active preset which may differ
+      // from the preset currently open in the editor.
+      const extraParams = path.startsWith('spectrogram.') && _editingPresetName
+        ? { preset_name: _editingPresetName }
+        : {};
+      schedulePatch(path, value, extraParams);
+    });
+  });
+
+  root.querySelectorAll('[data-path-list]').forEach(el => {
+    if (el._bound) return;
+    el._bound = true;
+    const path = el.getAttribute('data-path-list');
+    el.addEventListener('input', () => {
+      schedulePatch(path, el.value.split('\n').map(s => s.trim()).filter(Boolean));
+    });
+  });
+
+  root.querySelectorAll('input[type=range]').forEach(el => {
+    if (el._rb) return;
+    el._rb = true;
+    el.addEventListener('input', updateRangeDisplays);
+  });
+}
+
+// pendingPatchExtras holds extra body params (e.g. preset_name) keyed by path.
+// They're merged in when the batch flushes.
+let pendingPatchExtras = {};
+
+// ── OBS minimum canvas size guard ─────────────────────────────────────────────
+
+function calcMinObsSize(p) {
+  const n       = Math.max(1, p.bar_count      || 64);
+  const gap     = Math.max(0, p.bar_gap         || 2);
+  const minBarH = Math.max(1, p.bar_min_height  || 2);
+  const camber  = p.camber_degrees || 0;
+  const dbl     = p.double_sided   || false;
+  const W       = Math.max(1, p.obs_width || 800);
+
+  // Each bar must be ≥ 2 px wide: barW = (W - gap*(n-1))/n → W = 2n + gap*(n-1)
+  const minW = Math.ceil(2 * n + gap * (n - 1));
+
+  let minH;
+  if (camber >= 359.5) {
+    // Full circle: R_outer*(1-0.40) ≥ minBarH → minDim = 2*(minBarH/0.60 + 6)
+    const minDim = Math.ceil(2 * (minBarH / 0.60 + 6));
+    return { minW: Math.max(minW, minDim), minH: minDim };
+  } else if (camber > 0) {
+    // Partial arc: arcTopY = H - R*(1-cosH) must be ≥ minBarH
+    const halfRad = camber * Math.PI / 360;
+    const sinH    = Math.max(1e-6, Math.sin(halfRad));
+    const cosH    = Math.cos(halfRad);
+    const R       = Math.min((W * 0.48) / sinH, 5000);
+    minH = Math.ceil(R * (1 - cosH) + minBarH + 4);
+    if (dbl) minH += Math.ceil(minBarH + 4);
+  } else {
+    // Flat: maxH = dbl ? H/2-2 : H-2 must be ≥ minBarH
+    minH = dbl ? Math.ceil(minBarH * 2 + 8) : Math.ceil(minBarH + 4);
+  }
+  return { minW, minH };
+}
+
+function _obsReadDOM() {
+  let camber = 0;
+  const activeShape = document.querySelector('.shape-btn.active')?.dataset?.shape;
+  if (activeShape === 'bend')        camber = Number(document.getElementById('bend-degrees')?.value) || 45;
+  else if (activeShape === 'corner') camber = 90;
+  else if (activeShape === 'circle') camber = 360;
+  return {
+    bar_count:      parseInt(document.getElementById('bar-count')?.value)       || 64,
+    bar_gap:        parseInt(document.getElementById('bar-gap')?.value)          || 2,
+    bar_min_height: parseInt(document.getElementById('bar-min-height')?.value)   || 2,
+    obs_width:      parseInt(document.getElementById('obs-width')?.value)        || 800,
+    obs_height:     parseInt(document.getElementById('obs-height')?.value)       || 200,
+    double_sided:   document.getElementById('feature-select')?.value === 'double-sided',
+    camber_degrees: camber,
+  };
+}
+
+function updateObsMinHint() {
+  const hintEl = document.getElementById('obs-min-hint');
+  const minWEl = document.getElementById('obs-min-w');
+  const minHEl = document.getElementById('obs-min-h');
+  const wRow   = document.getElementById('obs-width-row');
+  const hRow   = document.getElementById('obs-height-row');
+  if (!hintEl) return;
+
+  const p = _obsReadDOM();
+  const { minW, minH } = calcMinObsSize(p);
+
+  minWEl.textContent = minW;
+  minHEl.textContent = minH;
+  hintEl.style.display = '';
+
+  const wConflict = p.obs_width  < minW;
+  const hConflict = p.obs_height < minH;
+  const anyConflict = wConflict || hConflict;
+
+  hintEl.classList.toggle('conflict', anyConflict);
+  wRow?.classList.toggle('obs-field-conflict', wConflict);
+  hRow?.classList.toggle('obs-field-conflict', hConflict);
+
+  if (anyConflict) {
+    hintEl.classList.remove('pulse');
+    void hintEl.offsetWidth;
+    hintEl.classList.add('pulse');
+    hintEl.addEventListener('animationend', () => hintEl.classList.remove('pulse'), { once: true });
+  }
+}
+
+function schedulePatch(path, value, extras = {}) {
+  // Block canvas dimension patches that would make bars invisible.
+  if (path === 'spectrogram.obs_width' || path === 'spectrogram.obs_height') {
+    const p = _obsReadDOM();
+    const candidate = {
+      ...p,
+      ...(path === 'spectrogram.obs_width'  ? { obs_width:  Number(value) } : {}),
+      ...(path === 'spectrogram.obs_height' ? { obs_height: Number(value) } : {}),
+    };
+    const { minW, minH } = calcMinObsSize(candidate);
+    if (candidate.obs_width < minW || candidate.obs_height < minH) {
+      updateObsMinHint();
+      return;
+    }
+  }
+  pendingPatches[path] = value;
+  if (Object.keys(extras).length) pendingPatchExtras[path] = extras;
+  setSaveState('saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushPatches, 600);
+}
+
+async function flushPatches() {
+  const batch = Object.entries(pendingPatches);
+  const extras = pendingPatchExtras;
+  pendingPatches = {};
+  pendingPatchExtras = {};
+  for (const [path, value] of batch) await patch(path, value, extras[path] || {});
+}
+
+async function patch(path, value, extras = {}) {
+  try {
+    const result = await api('PATCH', '/api/config', { path, value, ...extras });
+    // Keep in-memory config in sync so UI reads (e.g. prefix in command chips) are live
+    setNestedConfig(config, path, value);
+    setSaveState('saved');
+    if (result.restart_required) {
+      if (computeBotHash(config) !== _botSettingsBaseHash) {
+        needsBotRestart();
+      } else {
+        clearRestartState();
+      }
+    }
+    // Re-render command chips whenever the prefix changes — they display the prefix
+    if (path === 'twitch.prefix') renderCommandsTable();
+  } catch(e) { setSaveState('error', e.message); }
+}
+
+// Write a dotted-path value into a nested object (used to keep config in sync after patch)
+function setNestedConfig(obj, path, value) {
+  const parts = path.split('.');
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur == null || typeof cur !== 'object') return;
+    if (cur[parts[i]] === undefined || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  if (cur != null) cur[parts[parts.length - 1]] = value;
+}
+
+// ── Bot-restart ─────────────────────────────────────────────────────────────────
+
+// Hash of bot-relevant config at last successful bot start.
+// Compared after each restart-required PATCH — if back to baseline, alerting clears.
+let _botSettingsBaseHash = '';
+
+function computeBotHash(cfg) {
+  const t = cfg?.twitch || {};
+  const aliases = t.command_aliases ?? {};
+  const sortedAliases = {};
+  Object.keys(aliases).sort().forEach(k => {
+    sortedAliases[k] = [...(aliases[k] || [])].sort();
+  });
+  return JSON.stringify({
+    prefix:           t.prefix ?? '',
+    use_separate_bot: t.use_separate_bot ?? false,
+    command_aliases:  sortedAliases,
+  });
+}
+
+function needsBotRestart() {
+  const btn    = document.getElementById('bot-restart-btn');
+  const twNav  = document.querySelector('.nav-item[data-section="twitch"]');
+  const banner = document.getElementById('restart-banner');
+  if (btn)    btn.classList.add('needs-restart');
+  if (twNav)  twNav.classList.add('restart-needed');
+  if (banner) banner.classList.add('visible');
+}
+
+function clearRestartState() {
+  const btn    = document.getElementById('bot-restart-btn');
+  const twNav  = document.querySelector('.nav-item[data-section="twitch"]');
+  const banner = document.getElementById('restart-banner');
+  const sect   = document.getElementById('twitch');
+  if (btn)    { btn.classList.remove('needs-restart', 'restarting'); btn.textContent = 'restart service'; }
+  if (twNav)  twNav.classList.remove('restart-needed');
+  if (banner) banner.classList.remove('visible');
+  if (sect)   sect.classList.remove('section-restarting');
+}
+
+async function _doRestartBot() {
+  const btn  = document.getElementById('bot-restart-btn');
+  const sect = document.getElementById('twitch');
+  if (btn?.classList.contains('restarting')) return;  // already in flight
+  if (btn) { btn.classList.add('restarting'); btn.textContent = 'restarting service…'; }
+  if (sect) sect.classList.add('section-restarting');
+  try {
+    await api('POST', '/api/bot/restart');
+    // Wait for bot_status: {connected: true} via WS — that's the real signal.
+  } catch(e) {
+    toast('service restart failed: ' + (e.message || 'unknown error'), 'error');
+    clearRestartState();
+  }
+}
+
+document.getElementById('bot-restart-btn')?.addEventListener('click', _doRestartBot);
+
+// ── Shape selector ────────────────────────────────────────────────────────────
+
+// Map shape name → camber_degrees value written to config.
+const SHAPE_DEGREES = { inline: 0, bend: 45, corner: 90, circle: 360 };
+
+// Determine which shape a raw camber_degrees value belongs to.
+function shapeFromDegrees(deg) {
+  const d = Number(deg) || 0;
+  if (d === 0)  return 'inline';
+  if (d === 90) return 'corner';
+  if (d > 90)   return 'circle';
+  return 'bend';  // 1–89
+}
+
+// Apply a shape selection: update buttons, show/hide sub-controls,
+// patch config. Pass `silent=true` to skip the config PATCH (used on load).
+function applyShape(shape, silent = false) {
+  // Buttons
+  document.querySelectorAll('.shape-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.shape === shape)
+  );
+
+  // Sub-controls
+  document.getElementById('bend-row').style.display      = shape === 'bend'   ? '' : 'none';
+  document.getElementById('ouroboros-row').style.display = shape === 'circle' ? '' : 'none';
+
+  if (!silent) {
+    // For bend, read the current sub-slider value; otherwise use fixed mapping.
+    const degrees = shape === 'bend'
+      ? Number(document.getElementById('bend-degrees').value) || 45
+      : SHAPE_DEGREES[shape];
+    schedulePatch('spectrogram.camber_degrees', degrees);
+
+    // Mirror into local preset cache
+    const ap = (config.spectrogram_presets || []).find(
+      p => p.name === config.active_preset_name
+    );
+    if (ap) ap.camber_degrees = degrees;
+  }
+  updateObsMinHint();
+}
+
+// Wire shape buttons
+document.querySelectorAll('.shape-btn').forEach(btn => {
+  btn.addEventListener('click', () => applyShape(btn.dataset.shape));
+});
+
+// Bend sub-slider — patches camber_degrees as it moves
+document.getElementById('bend-degrees')?.addEventListener('input', e => {
+  const deg = Number(e.target.value);
+  document.getElementById('bend-degrees-val').textContent = deg;
+  schedulePatch('spectrogram.camber_degrees', deg);
+  const ap = (config.spectrogram_presets || []).find(
+    p => p.name === config.active_preset_name
+  );
+  if (ap) ap.camber_degrees = deg;
+  updateObsMinHint();
+});
+
+// ── Feature dropdown ──────────────────────────────────────────────────────────
+
+function featureFromPreset(preset) {
+  if (preset?.double_sided) return 'double-sided';
+  if (preset?.inverted)     return 'inverted';
+  return 'none';
+}
+
+document.getElementById('feature-select')?.addEventListener('change', e => {
+  const v = e.target.value;
+  schedulePatch('spectrogram.double_sided', v === 'double-sided');
+  schedulePatch('spectrogram.inverted',     v === 'inverted');
+  updateObsMinHint();
+  // Mirror into local preset cache
+  const ap = (config.spectrogram_presets || []).find(
+    p => p.name === config.active_preset_name
+  );
+  if (ap) {
+    ap.double_sided = v === 'double-sided';
+    ap.inverted     = v === 'inverted';
+  }
+});
+
+// Recalculate min-size hint whenever bar geometry or canvas dimensions change.
+['bar-count','bar-gap','bar-min-height','obs-width','obs-height'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', updateObsMinHint);
+});
+
+// Called from populatePresetEditor after other fields are set.
+function syncShapeFromPreset(preset) {
+  const deg = Number(preset?.camber_degrees ?? 0);
+  const shape = shapeFromDegrees(deg);
+  // If bend, seed the sub-slider with the saved angle
+  if (shape === 'bend') {
+    const slider = document.getElementById('bend-degrees');
+    if (slider) {
+      slider.value = deg;
+      const valEl = document.getElementById('bend-degrees-val');
+      if (valEl) valEl.textContent = deg;
+    }
+  }
+  applyShape(shape, true);  // silent — don't write back to config
+}
+
+// ── Nav scroll-spy ─────────────────────────────────────────────────────────────
+// Uses IntersectionObserver with root = #main scroll container.
+// rootMargin cuts the bottom 80% of the scroll area, so only sections in the
+// top 20% fire an intersection event — the topmost one in DOM order wins.
+function bindNav() {
+  const items    = document.querySelectorAll('.nav-item');
+  const sections = document.querySelectorAll('.section');
+  const mainEl   = document.getElementById('main');
+
+  sections.forEach(s => { s._intersecting = false; });
+
+  const setActive = () => {
+    const first = [...sections].find(s => s._intersecting);
+    if (!first) return;
+    items.forEach(a => a.classList.toggle('active', a.dataset.section === first.id));
+  };
+
+  const observer = new IntersectionObserver(entries => {
+    for (const entry of entries) entry.target._intersecting = entry.isIntersecting;
+    setActive();
+  }, {
+    root:       mainEl,
+    threshold:  0.01,
+    rootMargin: '0px 0px -80% 0px',  // trigger zone = top 20 % of scroll area
+  });
+
+  sections.forEach(s => observer.observe(s));
+
+  items.forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    document.getElementById(a.dataset.section)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+}
+
+// ── Remote config-change application ──────────────────────────────────────────
+// Called by the WS `config_changed` handler to mirror a change made in another
+// tab (or by the Python side) into this tab's UI without a full page reload.
+//
+// Rules:
+//  • spectrogram.* → update the in-memory preset object; only update DOM inputs
+//    if *presetName* matches the preset we're currently editing.
+//  • Everything else → update in-memory config + find the matching [data-path]
+//    input and set its value.
+//  • Never touch an element that has keyboard focus (don't clobber live typing).
+//  • Re-run any side-effects that the local input handler would have run.
+function _applyRemoteChange(path, value, presetName) {
+  if (path.startsWith('spectrogram.')) {
+    // Keep every preset's in-memory object in sync regardless of which one
+    // is being edited — so switching the dropdown shows fresh values.
+    const field = path.split('.')[1];
+    const targetName = presetName || config.active_preset_name;
+    const ep = (config.spectrogram_presets || []).find(p => p.name === targetName);
+    if (ep && field) ep[field] = value;
+
+    // Only touch the DOM inputs if this tab is currently editing that preset.
+    if (targetName !== _editingPresetName) return;
+
+    const el = document.querySelector(`[data-path="${path}"]`);
+    if (el && el !== document.activeElement) {
+      if (el.type === 'checkbox') el.checked = !!value;
+      else el.value = value ?? '';
+    }
+    if (field === 'cover_art_match') _setCoverArtMatchUI(!!value);
+    updateGradientPreview();
+    updateRangeDisplays();
+  } else {
+    // General case — update in-memory config and the matching input element.
+    setNestedConfig(config, path, value);
+
+    const el = document.querySelector(`[data-path="${path}"]`);
+    if (el && el !== document.activeElement) {
+      if (el.type === 'checkbox') el.checked = !!value;
+      else el.value = value ?? '';
+    }
+
+    // Side-effects that mirror what bindInputsInside does on local changes.
+    if (path === 'twitch.use_separate_bot')
+      document.getElementById('bot-section').style.display = value ? 'block' : 'none';
+    if (path === 'server.tunnel_mode') updateTunnelFields();
+    if (path === 'twitch.prefix') renderCommandsTable();
+  }
+}
+
+// ── Cover art match UI ─────────────────────────────────────────────────────────
+// Hide the manual colour pickers when the checkbox is on — they'd be overridden
+// every track anyway, and showing them just creates confusion.
+function _setCoverArtMatchUI(enabled) {
+  const row = document.getElementById('manual-colour-row');
+  if (row) row.style.display = enabled ? 'none' : '';
+}
+
+// ── Tunnel fields ──────────────────────────────────────────────────────────────
+function updateTunnelFields() {
+  const mode = document.getElementById('tunnel-mode')?.value || '';
+  document.getElementById('ngrok-fields').style.display     = mode === 'ngrok'      ? '' : 'none';
+  document.getElementById('cf-tos-row').style.display       = mode === 'cloudflare' ? '' : 'none';
+  document.getElementById('self-hosted-row').style.display  = mode === 'self'       ? '' : 'none';
+  // Show start/stop controls for any managed tunnel (not none/self)
+  const managed = mode !== 'none' && mode !== 'self' && mode !== '';
+  document.getElementById('tunnel-controls').style.display = managed ? '' : 'none';
+  if (managed) {
+    const host = (config.server || {}).host || '127.0.0.1';
+    const port = (config.server || {}).port || 8765;
+    const localEl = document.getElementById('local-panel-url');
+    if (localEl) localEl.textContent = `http://${host}:${port}`;
+  }
+  // Update the self-hosted forward URL to reflect the current server port
+  if (mode === 'self') {
+    const port = (config.server || {}).port || 8765;
+    const host = (config.server || {}).host || '127.0.0.1';
+    const urlEl = document.getElementById('self-hosted-url');
+    if (urlEl) urlEl.textContent = `http://${host}:${port}`;
+  }
+}
+
+// ── Tunnel start/stop ──────────────────────────────────────────────────────────
+async function tunnelStart() {
+  document.getElementById('tunnel-error').style.display = 'none';
+  document.getElementById('tunnel-url-display').textContent = 'Starting...';
+  document.getElementById('tunnel-start-btn').disabled = true;
+  // Flush any pending config patches (e.g. ToS acceptance) before the backend
+  // reads cfg — without this, a simultaneous checkbox + start click races the
+  // 600ms debounce and the server sees the old value.
+  clearTimeout(saveTimer);
+  await flushPatches();
+  try {
+    await api('POST', '/api/tunnel/start');
+    // URL arrives via WebSocket tunnel_status message — no polling needed
+  } catch (e) {
+    setTunnelStatus(null, false, e.message);
+  }
+}
+
+async function tunnelStop() {
+  try {
+    await api('POST', '/api/tunnel/stop');
+  } catch {}
+  setTunnelStatus(null, false);
+}
+
+function setTunnelStatus(url, online, error) {
+  const urlEl  = document.getElementById('tunnel-url-display');
+  const startBtn = document.getElementById('tunnel-start-btn');
+  const stopBtn  = document.getElementById('tunnel-stop-btn');
+  const errEl  = document.getElementById('tunnel-error');
+
+  if (online && url) {
+    urlEl.textContent = url;
+    urlEl.style.color = 'var(--accent)';
+    startBtn.style.display = 'none';
+    stopBtn.style.display  = '';
+    stopBtn.disabled = false;
+    errEl.style.display = 'none';
+  } else {
+    urlEl.textContent = url ? url : (online ? 'connecting...' : '');
+    urlEl.style.color = 'var(--dim)';
+    startBtn.style.display = '';
+    startBtn.disabled = false;
+    stopBtn.style.display  = 'none';
+    if (error) {
+      errEl.textContent = error;
+      errEl.style.display = '';
+    } else {
+      errEl.style.display = 'none';
+    }
+  }
+}
+
+// ── Gradient preview ───────────────────────────────────────────────────────────
+function updateGradientPreview() {
+  const s = document.getElementById('color-start')?.value || '#003300';
+  const m = document.getElementById('color-mid')?.value   || '#00cc33';
+  const e = document.getElementById('color-end')?.value   || '#00ff41';
+  const el = document.getElementById('gradient-preview');
+  if (el) el.style.background = `linear-gradient(to right, ${s}, ${m}, ${e})`;
+}
+
+// ── Range displays ─────────────────────────────────────────────────────────────
+function updateRangeDisplays() {
+  [['bar-count','bar-count-val'],['smoothing','smoothing-val'],
+   ['bg-alpha','bg-alpha-val'],['bend-degrees','bend-degrees-val'],
+   ['overlay-fps','overlay-fps-val']]
+    .forEach(([iid, vid]) => {
+      const i = document.getElementById(iid), v = document.getElementById(vid);
+      if (i && v) v.textContent = i.value;
+    });
+}
+
+// ── Restart badge ──────────────────────────────────────────────────────────────
+// ── Save state indicator ───────────────────────────────────────────────────────
+let _sst;
+function setSaveState(state, msg) {
+  const el = document.getElementById('save-state');
+  el.className = state;
+  el.textContent = state === 'saving' ? 'saving…'
+                 : state === 'error'  ? `save error: ${msg || ''}`
+                 : 'all changes saved';
+  if (state === 'saved') { clearTimeout(_sst); _sst = setTimeout(() => { el.className = ''; }, 3000); }
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+let _tt;
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `show ${type}`;
+  clearTimeout(_tt); _tt = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+boot().catch(e => { showStaleSession(); console.error('settings boot failed:', e); });
+
+// ── Removal section ────────────────────────────────────────────────────────────
+(function () {
+  let _pendingAction = null; // 'reset' | 'wipe'
+
+  const overlay  = document.getElementById('removal-overlay');
+  const boxTitle = document.getElementById('removal-box-title');
+  const boxBody  = document.getElementById('removal-box-body');
+  const cancelBtn = document.getElementById('removal-cancel-btn');
+  const confirmBtn = document.getElementById('removal-confirm-btn');
+
+  function showConfirm(action) {
+    _pendingAction = action;
+    const pyside6Row = document.getElementById('wipe-pyside6-row');
+    if (action === 'reset') {
+      boxTitle.textContent = 'Clear all data?';
+      boxBody.textContent  = 'This will permanently remove your saved config, Twitch tokens, and all credentials from this machine. The app will keep running so you can set up fresh.';
+      confirmBtn.textContent = 'Clear data';
+      if (pyside6Row) pyside6Row.style.display = 'none';
+    } else {
+      boxTitle.textContent = 'Remove everything and exit?';
+      boxBody.textContent  = 'This will wipe all local data — config, tokens, and keys — then close the app. This cannot be undone.';
+      confirmBtn.textContent = 'Remove & exit';
+      if (pyside6Row) pyside6Row.style.display = 'flex';
+    }
+    overlay.classList.add('visible');
+  }
+
+  function hideConfirm() {
+    overlay.classList.remove('visible');
+    _pendingAction = null;
+    confirmBtn.disabled = false;
+  }
+
+  document.getElementById('reset-data-btn').addEventListener('click', () => showConfirm('reset'));
+  document.getElementById('wipe-exit-btn').addEventListener('click',  () => showConfirm('wipe'));
+  cancelBtn.addEventListener('click', hideConfirm);
+  overlay.addEventListener('click', e => { if (e.target === overlay) hideConfirm(); });
+
+  confirmBtn.addEventListener('click', async () => {
+    const action = _pendingAction;
+    hideConfirm();
+    if (!action) return;
+
+    confirmBtn.disabled = true;
+
+    if (action === 'reset') {
+      try {
+        const r = await fetch('/api/data/reset', { method: 'POST' });
+        if (!r.ok) { toast('Reset failed — server error', 'error'); return; }
+        // The WS data_reset event will reload the page once the server confirms.
+        toast('Clearing data…', 'ok');
+      } catch { toast('Reset failed — connection error', 'error'); }
+    } else {
+      const removePyside6 = document.getElementById('wipe-pyside6-check')?.checked ?? true;
+      try {
+        await fetch('/api/data/wipe', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ remove_pyside6: removePyside6 }),
+        });
+      } catch { /* App is shutting down — connection close is expected */ }
+      // Close this settings tab — the native RemovalSplash will appear on the
+      // desktop while the app wipes its data and exits.
+      window.close();
+    }
+  });
+
+  // Handle data_reset WS event — reload so the page reflects cleared state.
+  window._onDataReset = function () {
+    window.location.reload();
+  };
+}());
+
+// ── Local Data section ───────────────────────────────────────────────────────
+(async function () {
+  // Load app version + check initial update state
+  try {
+    const ur = await fetch('/api/update/status');
+    if (ur.ok) {
+      const us = await ur.json();
+      const verEl = document.getElementById('app-version');
+      if (verEl) verEl.textContent = us.current || '—';
+      if (us.available && us.latest) {
+        const banner = document.getElementById('update-banner');
+        const msgEl  = document.getElementById('update-banner-msg');
+        const linkEl = document.getElementById('update-release-link');
+        if (msgEl)  msgEl.textContent = `MusicHat v${us.latest} is available`;
+        if (linkEl) linkEl.href = us.releases_page || '#';
+        if (banner) banner.classList.add('visible');
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // Check for updates button
+  document.getElementById('check-update-btn')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('check-update-status');
+    const btn      = document.getElementById('check-update-btn');
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = 'checking…';
+    try {
+      const r = await fetch('/api/update/check', { method: 'POST' });
+      if (r.ok) {
+        const s = await r.json();
+        const verEl = document.getElementById('app-version');
+        if (verEl && s.current) verEl.textContent = s.current;
+        if (s.available && s.latest) {
+          const banner = document.getElementById('update-banner');
+          const msgEl  = document.getElementById('update-banner-msg');
+          const linkEl = document.getElementById('update-release-link');
+          if (msgEl)  msgEl.textContent = `MusicHat v${s.latest} is available`;
+          if (linkEl) linkEl.href = s.releases_page || '#';
+          if (banner) banner.classList.add('visible');
+          if (statusEl) statusEl.textContent = `v${s.latest} available`;
+        } else {
+          if (statusEl) statusEl.textContent = s.current === 'dev' ? 'dev build' : 'up to date';
+        }
+      }
+    } catch { if (statusEl) statusEl.textContent = 'check failed'; }
+    finally { if (btn) btn.disabled = false; }
+  });
+
+  // Load and display data dir info (also feeds the BYOI auth mode row)
+  try {
+    const r = await fetch('/api/data/info');
+    if (r.ok) {
+      const info = await r.json();
+      const pathEl = document.getElementById('data-dir-path');
+      const verEl  = document.getElementById('pyside6-version');
+      if (pathEl) pathEl.textContent = info.data_dir || '—';
+      if (verEl)  verEl.textContent  = info.pyside6_version || '—';
+
+      // BYOI auth mode row
+      const badge   = document.getElementById('auth-mode-badge');
+      const desc    = document.getElementById('auth-mode-desc');
+      const envPath = document.getElementById('byoi-env-path');
+      if (info.byoi_mode) {
+        if (badge) { badge.textContent = 'byoi'; badge.style.background = 'rgba(34,197,94,.15)'; badge.style.color = '#4ade80'; }
+        if (desc)  desc.textContent = 'using your own Twitch app';
+      } else {
+        if (badge) badge.textContent = 'proxied';
+        if (desc)  desc.textContent = 'auth routed through musicauth.xwhitehat.dev';
+      }
+      if (envPath) envPath.textContent = info.env_file || '';
+    }
+  } catch { /* non-fatal — fields stay blank */ }
+
+  // Open .env in default editor
+  document.getElementById('open-env-btn')?.addEventListener('click', async () => {
+    try { await fetch('/api/byoi/open-env', { method: 'POST' }); }
+    catch { toast('Could not open .env file', 'error'); }
+  });
+
+  // Open folder in Explorer
+  document.getElementById('open-data-dir-btn')?.addEventListener('click', async () => {
+    try { await fetch('/api/data/open-folder', { method: 'POST' }); }
+    catch { toast('Could not open folder', 'error'); }
+  });
+
+  // Move… — inline expand with path input
+  const moveBtn    = document.getElementById('migrate-data-dir-btn');
+  const statusDiv  = document.getElementById('migrate-status');
+  let   _moveExpanded = false;
+  let   _moveInput    = null;
+
+  moveBtn?.addEventListener('click', () => {
+    if (_moveExpanded) {
+      // Collapse
+      _moveInput?.remove();
+      _moveInput = null;
+      _moveExpanded = false;
+      moveBtn.textContent = 'Move…';
+      return;
+    }
+    _moveExpanded = true;
+    moveBtn.textContent = 'Cancel';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:8px;margin-top:10px;align-items:center';
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = 'New folder path…';
+    inp.style.cssText = 'flex:1;font-family:monospace;font-size:11px;padding:5px 8px;background:var(--input-bg,rgba(255,255,255,.06));border:1px solid var(--border);border-radius:4px;color:var(--text)';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = 'Copy & move';
+
+    let _migrateOverwriteConfirmed = false;
+
+    confirmBtn.addEventListener('click', async () => {
+      const newPath = inp.value.trim();
+      if (!newPath) { toast('Enter a folder path', 'error'); return; }
+
+      // Check destination for existing MusicHat data before migrating.
+      if (!_migrateOverwriteConfirmed) {
+        let existing = null;
+        try {
+          const chk = await fetch('/api/data/check-folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ path: newPath }),
+          });
+          if (chk.ok) existing = await chk.json();
+        } catch { /* non-fatal — proceed without check */ }
+
+        if (existing) {
+          const found = [];
+          if (existing.has_pyside6)   found.push('PySide6 library');
+          if (existing.has_config)    found.push('config.json');
+          if (existing.has_playlists) found.push('playlists.json');
+          if (found.length > 0) {
+            statusDiv.style.display = 'block';
+            statusDiv.style.color   = 'var(--warning,#f59e0b)';
+            statusDiv.innerHTML =
+              `<strong>⚠ This folder already contains:</strong> ${found.join(', ')}.<br>` +
+              `Migration will overwrite this data with your current data.<br>` +
+              `<button id="migrate-overwrite-btn" style="margin-top:8px;padding:4px 12px;` +
+              `font-size:11px;border:1px solid currentColor;border-radius:4px;` +
+              `background:transparent;color:var(--warning,#f59e0b);cursor:pointer">` +
+              `Proceed anyway</button>`;
+            document.getElementById('migrate-overwrite-btn')
+              ?.addEventListener('click', () => {
+                _migrateOverwriteConfirmed = true;
+                statusDiv.innerHTML = '';
+                confirmBtn.click();
+              });
+            return;
+          }
+        }
+      }
+
+      _migrateOverwriteConfirmed = false;
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Copying…';
+      statusDiv.style.display = 'block';
+      statusDiv.style.color   = 'var(--text-muted,#9ca3af)';
+      statusDiv.textContent   = 'Copying files — this may take a moment…';
+
+      try {
+        const r = await fetch('/api/data/migrate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ new_path: newPath }),
+        });
+        const body = await r.json();
+        if (!r.ok) {
+          statusDiv.style.color = 'var(--danger,#ef4444)';
+          statusDiv.textContent = body.error || 'Migration failed';
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Copy & move';
+        } else {
+          statusDiv.style.color = 'var(--green,#22c55e)';
+          statusDiv.textContent = 'Files copied — restart MusicHat to use the new location.';
+          wrap.remove();
+          _moveInput = null;
+          _moveExpanded = false;
+          moveBtn.textContent = 'Move…';
+        }
+      } catch {
+        statusDiv.style.color = 'var(--danger,#ef4444)';
+        statusDiv.textContent = 'Connection error during migration';
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Copy & move';
+      }
+    });
+
+    wrap.appendChild(inp);
+    wrap.appendChild(confirmBtn);
+    moveBtn.insertAdjacentElement('afterend', wrap);
+    _moveInput = wrap;
+    inp.focus();
+  });
+
+  // Handle WS events for migration
+  window._onDataMigrated = function(msg) {
+    if (statusDiv) {
+      statusDiv.style.display = 'block';
+      statusDiv.style.color   = 'var(--green,#22c55e)';
+      statusDiv.textContent   = msg.message || 'Migration complete — please restart.';
+    }
+    toast('Data folder moved — restart to apply', 'ok');
+  };
+  window._onDataMigrateError = function(msg) {
+    if (statusDiv) {
+      statusDiv.style.display = 'block';
+      statusDiv.style.color   = 'var(--danger,#ef4444)';
+      statusDiv.textContent   = msg.message || 'Migration failed';
+    }
+    toast('Migration failed: ' + (msg.message || 'unknown error'), 'error');
+  };
+}());
+</script>
+
+</body>
+</html>

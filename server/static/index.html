@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MusicHat — mod panel</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    /* ── Design system — xwhitehat.dev ──────────────────────────────── */
+    :root {
+      --bg:           #000000;
+      --card-bg:      rgba(4,14,6,0.92);
+      --green:        #00ff41;
+      --green-dim:    #00cc33;
+      --green-glow:   rgba(0,255,65,0.35);
+      --green-border: rgba(0,255,65,0.2);
+      --green-subtle: rgba(0,255,65,0.07);
+      --text:         #b8ffca;
+      --text-dim:     #4d8a5f;
+      --red:          #ff3333;
+      --yellow:       #ffe033;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Share Tech Mono', 'Fira Code', 'Courier New', monospace;
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Layout ── */
+    .page { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--green-border);
+    }
+
+    .header h1 {
+      color: var(--green);
+      font-size: 20px;
+      letter-spacing: 0.06em;
+      text-shadow: 0 0 18px var(--green-glow);
+    }
+
+    .header h1 span { color: var(--text-dim); }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .led {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #333;
+    }
+    .led.green  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s ease-in-out infinite; }
+    .led.red    { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+    .led.yellow { background: var(--yellow);box-shadow: 0 0 6px var(--yellow); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.45; }
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--green-border);
+      border-radius: 12px;
+      padding: 20px 22px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 0 30px rgba(0,255,65,0.04), 0 12px 40px rgba(0,0,0,0.6);
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    /* ── Now playing ── */
+    .now-playing {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .track-info { flex: 1; }
+    .track-title { font-size: 16px; color: var(--green); letter-spacing: 0.04em; margin-bottom: 3px; }
+    .track-artist { font-size: 12px; color: var(--text-dim); }
+
+    /* ── Transport controls ── */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      background: var(--green-subtle);
+      border: 1px solid var(--green-border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 16px;
+      font-family: inherit;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .btn:hover {
+      background: rgba(0,255,65,0.12);
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .btn.danger { border-color: rgba(255,51,51,0.35); color: #ff6666; }
+    .btn.danger:hover { background: rgba(255,51,51,0.1); border-color: var(--red); color: var(--red); }
+    .btn.accent { border-color: var(--green); color: var(--green); background: rgba(0,255,65,0.1); }
+    .btn.active { border-color: var(--red); color: var(--red); background: rgba(255,51,51,0.08); }
+    .btn.active:hover { background: rgba(255,51,51,0.16); }
+
+    .btn:disabled {
+      opacity: 0.25;
+      cursor: not-allowed;
+      pointer-events: none;
+      border-color: rgba(0,255,65,0.08);
+      color: var(--text-dim);
+      background: transparent;
+    }
+
+    /* ── Queue list ── */
+    .queue-list { list-style: none; }
+
+    .queue-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(0,255,65,0.06);
+      transition: background 0.12s;
+    }
+
+    .queue-item:hover { background: rgba(0,255,65,0.04); }
+    .queue-item:last-child { border-bottom: none; }
+
+    .queue-pos {
+      width: 28px;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .queue-track { flex: 1; }
+    .queue-track-title { color: var(--text); font-size: 13px; }
+    .queue-track-by { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+    .queue-actions { display: flex; gap: 6px; }
+
+    .icon-btn {
+      background: transparent;
+      border: 1px solid rgba(0,255,65,0.12);
+      border-radius: 4px;
+      color: var(--text-dim);
+      padding: 4px 8px;
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .icon-btn:hover { border-color: var(--green); color: var(--green); }
+    .icon-btn.danger:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Login screen ── */
+    .login-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      gap: 20px;
+      text-align: center;
+    }
+
+    .login-screen h2 { color: var(--green); font-size: 18px; letter-spacing: 0.04em; }
+    .login-screen p  { color: var(--text-dim); font-size: 12px; max-width: 320px; line-height: 1.6; }
+
+    .twitch-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(145,70,255,0.15);
+      border: 1px solid rgba(145,70,255,0.45);
+      border-radius: 6px;
+      color: #c4a0ff;
+      padding: 10px 22px;
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+
+    .twitch-btn:hover {
+      background: rgba(145,70,255,0.25);
+      border-color: #9146ff;
+      color: #9146ff;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--green-border) 30%, var(--green-border) 70%, transparent);
+      margin: 20px 0;
+    }
+
+    /* ── Auth check ── */
+    #app { display: none; }
+    #login { display: flex; }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      margin-top: 32px;
+      color: var(--text-dim);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+    }
+
+    .cursor {
+      animation: blink 1.1s step-end infinite;
+      color: rgba(0,255,65,0.4);
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    /* ── Search ── */
+    .search-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .search-row input[type="text"] {
+      flex: 1;
+      background: rgba(0,255,65,0.04);
+      border: 1px solid var(--green-border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 7px 12px;
+      outline: none;
+    }
+
+    .search-row input[type="text"]:focus {
+      border-color: var(--green-dim);
+    }
+
+    .search-results { list-style: none; }
+
+    .search-result-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(0,255,65,0.06);
+      transition: background 0.12s;
+    }
+
+    .search-result-item:hover { background: rgba(0,255,65,0.04); }
+    .search-result-item:last-child { border-bottom: none; }
+
+    .search-result-thumb {
+      width: 48px; height: 36px;
+      border-radius: 3px;
+      object-fit: cover;
+      background: #111;
+      flex-shrink: 0;
+    }
+
+    .search-result-info { flex: 1; overflow: hidden; }
+    .search-result-title {
+      color: var(--text);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .search-result-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+    .sign-out-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      padding: 0;
+    }
+    .sign-out-btn:hover { color: var(--red); }
+
+    /* ── Action log ── */
+    .action-log { list-style: none; }
+
+    .action-log-entry {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 6px 12px;
+      border-bottom: 1px solid rgba(0,255,65,0.04);
+      font-size: 11px;
+    }
+    .action-log-entry:last-child { border-bottom: none; }
+
+    .log-ts    { color: var(--text-dim); flex-shrink: 0; min-width: 55px; }
+    .log-actor { color: var(--green-dim); flex-shrink: 0; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .log-action { color: var(--text-dim); flex-shrink: 0; min-width: 56px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .log-title { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .log-outcome { flex-shrink: 0; }
+    .log-outcome.ok { color: var(--green); }
+    .log-outcome.err { color: var(--red); }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Login ───────────────────────────────────────────────────────── -->
+  <div id="login" class="login-screen">
+    <h2>> mod panel</h2>
+    <p id="login-for"></p>
+    <button class="twitch-btn" id="signin-btn" onclick="startTwitchAuth()">
+      <svg width="18" height="18" viewBox="0 0 512 512" fill="currentColor"><path d="M391.17,103.47H352.54v109.7h38.63ZM285,103H246.37V212.75H285ZM120.83,0,24.31,91.42V420.58H140.14V512l96.53-91.42h77.25L487.69,256V0ZM449.07,237.75l-77.22,73.12H294.61l-67.6,64v-64H140.14V36.58H449.07Z"/></svg>
+      Sign in with Twitch
+    </button>
+    <p id="login-status" style="color:var(--text-dim);font-size:11px;"></p>
+  </div>
+
+  <!-- ── App ────────────────────────────────────────────────────────── -->
+  <div id="app">
+
+    <header class="header">
+      <h1>> musichat <span>/ mod panel</span></h1>
+      <div style="display:flex;align-items:center;gap:16px">
+        <span id="me-username" style="font-size:11px;color:var(--text-dim);letter-spacing:0.06em"></span>
+        <button class="sign-out-btn" onclick="signOut()">sign out</button>
+        <div class="status-pill">
+          <div class="led" id="ws-led"></div>
+          <span id="ws-status">connecting</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Now playing -->
+    <div class="card">
+      <div class="card-title">now playing</div>
+      <div class="now-playing" id="now-playing">
+        <div class="track-info">
+          <div class="track-title" id="np-title">—</div>
+          <div class="track-artist" id="np-artist"></div>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="btn" id="fb-btn"        onclick="prevTrack()"  disabled>|&lt; prev</button>
+        <button class="btn" id="playpause-btn" onclick="playpause()"  disabled>▶ Play</button>
+        <button class="btn" id="ff-btn"        onclick="skip()"       disabled>skip &gt;|</button>
+        <span id="np-requester" style="color:var(--text-dim);font-size:11px;margin-left:4px;"></span>
+      </div>
+      <div class="controls" style="margin-top:6px">
+        <button class="btn" id="pause-requests-btn" onclick="togglePauseRequests()">⏸ pause requests</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Queue -->
+    <div class="card">
+      <div class="card-title">queue</div>
+      <ul class="queue-list" id="queue-list">
+        <li style="color:var(--text-dim);padding:10px 12px;font-size:12px;">Empty</li>
+      </ul>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Search -->
+    <div class="card">
+      <div class="card-title">request a song</div>
+      <div class="search-row">
+        <input type="text" id="search-input" placeholder="search YouTube..." autocomplete="off"
+               onkeydown="if(event.key==='Enter') doSearch()">
+        <button class="btn accent" onclick="doSearch()">Search</button>
+      </div>
+      <div id="search-status" style="font-size:11px;color:var(--text-dim);margin-bottom:8px;display:none"></div>
+      <ul class="search-results" id="search-results"></ul>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Action log -->
+    <div class="card">
+      <div class="card-title">recent actions</div>
+      <ul class="action-log" id="action-log">
+        <li style="color:var(--text-dim);padding:6px 12px;font-size:11px;">No actions yet.</li>
+      </ul>
+    </div>
+
+  </div><!-- #app -->
+
+  <footer class="footer">
+    Made by XWhiteHat <span class="cursor">█</span>
+  </footer>
+</div><!-- .page -->
+
+<script>
+  // ── DPoP (Channel B: mod browser → streamer PC) ───────────────────────────
+  // Ephemeral EC P-256 keypair generated once per session at page load.
+  // Private key is non-extractable (extractable:false); per the WebCrypto spec
+  // the public key is always extractable for EC key pairs regardless of this flag.
+  let _dpopKeyPair = null;
+  let _dpopPublicJwk = null;
+
+  async function initDPoP() {
+    try {
+      _dpopKeyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,  // private key cannot be exported
+        ['sign', 'verify']
+      );
+      const jwk = await crypto.subtle.exportKey('jwk', _dpopKeyPair.publicKey);
+      delete jwk.d;          // strip private component if somehow present
+      delete jwk.key_ops;    // strip usage hints (not needed for verification)
+      delete jwk.ext;
+      _dpopPublicJwk = jwk;
+    } catch (e) {
+      console.warn('[dpop] initDPoP failed — DPoP disabled for this session:', e);
+    }
+  }
+
+  function _b64url(buffer) {
+    return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  function _b64urlEncodeJson(obj) {
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    return btoa(String.fromCharCode(...bytes))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  async function _makeDpopProof(method, url) {
+    if (!_dpopKeyPair || !_dpopPublicJwk) return null;
+    const header = { typ: 'dpop+jwt', alg: 'ES256', jwk: _dpopPublicJwk };
+    const payload = {
+      jti: crypto.randomUUID(),
+      htm: method.toUpperCase(),
+      htu: url.split('?')[0],
+      iat: Math.floor(Date.now() / 1000),
+    };
+    const hdrB64  = _b64urlEncodeJson(header);
+    const payB64  = _b64urlEncodeJson(payload);
+    const sigInput = new TextEncoder().encode(`${hdrB64}.${payB64}`);
+    const sigBuf   = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, _dpopKeyPair.privateKey, sigInput);
+    return `${hdrB64}.${payB64}.${_b64url(sigBuf)}`;
+  }
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  let jwt = null;
+  let ws = null;
+  let _wsActive = false;  // false = intentionally disconnected (sign-out)
+
+  // Initialise DPoP keypair early — before login redirect or JWT check
+  initDPoP();
+
+  function startTwitchAuth() {
+    // All OAuth URL building happens server-side — just redirect to /login.
+    document.getElementById('login-status').textContent = 'Redirecting to Twitch…';
+    window.location.href = '/login';
+  }
+
+  // sessionStorage: JWT dies when the tab closes so a mod on a shared
+  // computer doesn't leave credentials behind across browser sessions.
+  function getToken() {
+    return sessionStorage.getItem('mh_jwt');
+  }
+
+  function saveToken(token) {
+    jwt = token;
+    sessionStorage.setItem('mh_jwt', token);
+  }
+
+  function clearToken() {
+    jwt = null;
+    sessionStorage.removeItem('mh_jwt');
+  }
+
+  // Silently re-verify the JWT every 10 minutes so:
+  //  a) Expired tokens (2-hour lifetime) redirect to login instead of silently failing.
+  //  b) Mods demoted on Twitch lose access within one check window (server-side
+  //     the JWT is still structurally valid, but /me will return 401 once the
+  //     server's JWT secret is rotated on app restart — this is belt-and-suspenders
+  //     until a proper revocation list is in place).
+  setInterval(async () => {
+    if (!jwt) return;
+    try {
+      // Use apiFetch so the DPoP proof is included if a keypair is registered
+      const r = await apiFetch('/me');
+      if (!r.ok) { clearToken(); showLogin(); }
+    } catch (_) { /* network blip — try again next interval */ }
+  }, 10 * 60 * 1000);
+
+  async function init() {
+    // Populate the login screen with the streamer's channel name.
+    try {
+      const cfgResp = await fetch('/config.js');
+      if (cfgResp.ok) {
+        const cfg = await cfgResp.json();
+        const ch = (cfg.channel || '').trim();
+        document.getElementById('login-for').textContent =
+          ch ? `Sign in to manage ${ch}'s queue.` : 'Sign in to manage the queue.';
+      }
+    } catch (_) {
+      document.getElementById('login-for').textContent = 'Sign in to manage the queue.';
+    }
+
+    jwt = getToken();
+    if (!jwt) { showLogin(); return; }
+
+    const resp = await fetch('/me', { headers: { Authorization: 'Bearer ' + jwt } });
+    if (!resp.ok) { clearToken(); showLogin(); return; }
+
+    const me = await resp.json();
+    document.getElementById('me-username').textContent = '@' + (me.username || '?');
+
+    // Register the DPoP public JWK with the server so subsequent API calls
+    // can be verified.  Non-fatal if it fails (server still accepts the JWT).
+    if (_dpopPublicJwk) {
+      try {
+        await fetch('/auth/register-dpop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt },
+          body: JSON.stringify({ jwk: _dpopPublicJwk }),
+        });
+      } catch (_) { /* best-effort */ }
+    }
+
+    showApp();
+    _wsActive = true;
+    connectWS();
+  }
+
+  function showLogin() {
+    document.getElementById('login').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
+  }
+
+  function showApp() {
+    document.getElementById('login').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+  }
+
+  // ── WebSocket queue stream ────────────────────────────────────────────────
+  let _wsPingInterval = null;
+
+  async function connectWS() {
+    if (!_wsActive) return;
+    // Fetch a one-time 30-second ticket so the JWT never appears in the WS URL
+    // (browsers cannot send Authorization headers on a WebSocket upgrade).
+    let ticket;
+    try {
+      const r = await apiFetch('/queue/ws-ticket');
+      if (!r.ok) { setWSStatus(false); if (_wsActive) setTimeout(connectWS, 3000); return; }
+      ticket = (await r.json()).ticket;
+    } catch (_) { setWSStatus(false); if (_wsActive) setTimeout(connectWS, 3000); return; }
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/queue/live?ticket=${encodeURIComponent(ticket)}`);
+
+    ws.onopen = () => {
+      setWSStatus(true);
+      // Send a ping every 30s so Cloudflare/ngrok tunnels don't kill the
+      // idle connection (CF drops WebSockets with no traffic after 100s).
+      _wsPingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 30000);
+    };
+
+    ws.onclose = () => {
+      setWSStatus(false);
+      clearInterval(_wsPingInterval);
+      if (_wsActive) setTimeout(connectWS, 3000);
+    };
+    ws.onerror = () => setWSStatus(false);
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        renderQueue(data);
+      } catch {}
+    };
+  }
+
+  function setWSStatus(online) {
+    const led = document.getElementById('ws-led');
+    const lbl = document.getElementById('ws-status');
+    led.className = 'led ' + (online ? 'green' : 'red');
+    lbl.textContent = online ? 'live' : 'reconnecting';
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  let _currentTrackId = null;
+  let _playerState = 'STOPPED';
+  let _requestsPaused = false;
+
+  function updateTransportButtons() {
+    const active = (_playerState === 'PLAYING' || _playerState === 'PAUSED') && _currentTrackId !== null;
+    document.getElementById('fb-btn').disabled        = !active;
+    document.getElementById('ff-btn').disabled        = !active;
+    document.getElementById('playpause-btn').disabled = !active;
+
+    const ppBtn = document.getElementById('playpause-btn');
+    if (_playerState === 'PAUSED') {
+      ppBtn.textContent = '▶ Play';
+    } else if (_playerState === 'PLAYING') {
+      ppBtn.textContent = '⏸ Pause';
+    } else {
+      ppBtn.textContent = '▶ Play';
+    }
+  }
+
+  function renderQueue(data) {
+    const cur = data.current;
+    _playerState = data.state || 'STOPPED';
+    if (typeof data.requests_paused !== 'undefined') {
+      _requestsPaused = data.requests_paused;
+      const prBtn = document.getElementById('pause-requests-btn');
+      if (prBtn) {
+        prBtn.textContent = _requestsPaused ? '▶ resume requests' : '⏸ pause requests';
+        prBtn.classList.toggle('active', _requestsPaused);
+      }
+    }
+
+    // Track which song we're showing so skip can send it back for idempotency.
+    _currentTrackId = cur ? cur.id : null;
+
+    document.getElementById('np-title').textContent = cur ? cur.title : '—';
+    document.getElementById('np-artist').textContent = '';
+    document.getElementById('np-requester').textContent =
+      cur && cur.requested_by ? `requested by @${cur.requested_by}` : '';
+
+    const list = document.getElementById('queue-list');
+    if (!data.queue || data.queue.length === 0) {
+      list.innerHTML = '<li style="color:var(--text-dim);padding:10px 12px;font-size:12px;">Empty</li>';
+    } else {
+      list.innerHTML = data.queue.map((t, i) => `
+        <li class="queue-item">
+          <span class="queue-pos">${i + 1}.</span>
+          <div class="queue-track">
+            <div class="queue-track-title">${esc(t.title)}</div>
+            ${t.requested_by ? `<div class="queue-track-by">@${esc(t.requested_by)}</div>` : ''}
+          </div>
+          <div class="queue-actions">
+            <button class="icon-btn danger" onclick="removeTrack('${esc(t.id)}')">✕</button>
+            ${i > 0 ? `<button class="icon-btn" onclick="moveTrack('${esc(t.id)}', ${i})">↑</button>` : ''}
+          </div>
+        </li>
+      `).join('');
+    }
+
+    updateTransportButtons();
+
+    // Action log — newest first, last 10 shown
+    if (data.log && data.log.length > 0) {
+      _lastLogEntries = [...data.log].reverse().slice(0, 10);
+      _renderLog();
+    }
+  }
+
+  // Cache last log entries so the relative-time ticker can redraw without a
+  // new server push.
+  let _lastLogEntries = [];
+
+  function relTime(isoTs) {
+    const diffSec = Math.floor((Date.now() - new Date(isoTs).getTime()) / 1000);
+    if (diffSec < 10)  return 'just now';
+    if (diffSec < 60)  return diffSec + 's ago';
+    const m = Math.floor(diffSec / 60);
+    if (m < 60)        return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24)        return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+
+  function _renderLog() {
+    if (!_lastLogEntries.length) return;
+    const logEl = document.getElementById('action-log');
+    if (!logEl) return;
+    logEl.innerHTML = _lastLogEntries.map(e => {
+      const ok = e.outcome === 'ok';
+      return `<li class="action-log-entry">
+        <span class="log-ts">${relTime(e.ts)}</span>
+        <span class="log-actor">@${esc(e.actor || 'system')}</span>
+        <span class="log-action">${esc(e.action)}</span>
+        <span class="log-title">${esc(e.track_title || e.track_id || '—')}</span>
+        <span class="log-outcome ${ok ? 'ok' : 'err'}">${ok ? '✓' : '✗ ' + esc(e.outcome || '')}</span>
+      </li>`;
+    }).join('');
+  }
+
+  // Tick every 30 s so relative labels ("2m ago") stay current without needing
+  // a server push.
+  setInterval(_renderLog, 30_000);
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  async function apiFetch(path, opts = {}) {
+    const absUrl = new URL(path, window.location.origin).href;
+    const dpopProof = await _makeDpopProof(opts.method || 'GET', absUrl);
+    opts.headers = {
+      ...(opts.headers || {}),
+      Authorization: 'Bearer ' + jwt,
+      ...(dpopProof ? { DPoP: dpopProof } : {}),
+    };
+    const resp = await fetch(path, opts);
+    if (resp.status === 401) { clearToken(); showLogin(); }
+    return resp;
+  }
+
+  async function playpause() {
+    const resp = await apiFetch('/queue/playpause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Send what we believe the current state is — server rejects if it
+      // already changed (another mod beat us to it) and returns actual state.
+      body: JSON.stringify({ expected_state: _playerState }),
+    });
+    if (resp.status === 409) {
+      try { renderQueue(await resp.json()); } catch {}
+    }
+  }
+
+  async function seekRelative(delta) {
+    const resp = await apiFetch('/queue/seek', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Include the track we were looking at so a stale seek (track changed
+      // between click and request) is safely dropped server-side.
+      body: JSON.stringify({ delta, track_id: _currentTrackId }),
+    });
+    if (resp.status === 409) {
+      try { renderQueue(await resp.json()); } catch {}
+    }
+  }
+
+  async function skip() {
+    const resp = await apiFetch('/queue/skip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track_id: _currentTrackId }),
+    });
+    // 409 = track already gone (concurrent skip) — server returns actual state
+    if (resp.status === 409) {
+      try { renderQueue(await resp.json()); } catch {}
+    }
+  }
+
+  async function prevTrack() {
+    const resp = await apiFetch('/queue/prev', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Send what we think is playing so the server can detect a stale click
+      // (track changed between render and request) and resync instead of acting.
+      body: JSON.stringify({ track_id: _currentTrackId }),
+    });
+    if (resp.status === 409) {
+      try { renderQueue(await resp.json()); } catch {}
+    }
+  }
+
+  function signOut() {
+    clearToken();
+    _wsActive = false;
+    if (ws) { ws.close(); ws = null; }
+    showLogin();
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  let _searchInFlight = false;
+  let _searchResults = [];
+
+  async function doSearch() {
+    const q = document.getElementById('search-input').value.trim();
+    if (!q || _searchInFlight) return;
+    _searchInFlight = true;
+    const statusEl = document.getElementById('search-status');
+    const listEl = document.getElementById('search-results');
+    statusEl.textContent = 'Searching...';
+    statusEl.style.display = '';
+    listEl.innerHTML = '';
+    _searchResults = [];
+    try {
+      const resp = await apiFetch('/search?q=' + encodeURIComponent(q));
+      const data = await resp.json();
+      if (!data.results || data.results.length === 0) {
+        statusEl.textContent = 'No results found.';
+        return;
+      }
+      _searchResults = data.results;
+      statusEl.style.display = 'none';
+      listEl.innerHTML = _searchResults.map((r, i) => `
+        <li class="search-result-item">
+          ${r.thumbnail
+            ? `<img class="search-result-thumb" src="${esc(r.thumbnail)}" alt="" loading="lazy">`
+            : `<div class="search-result-thumb"></div>`}
+          <div class="search-result-info">
+            <div class="search-result-title" title="${esc(r.title)}">${esc(r.title)}</div>
+            ${r.duration ? `<div class="search-result-meta">${fmtDuration(r.duration)}</div>` : ''}
+          </div>
+          <button class="btn accent" style="flex-shrink:0" onclick="enqueueTrack(${i})">+ Queue</button>
+        </li>
+      `).join('');
+    } catch (e) {
+      statusEl.textContent = 'Search failed. Try again.';
+    } finally {
+      _searchInFlight = false;
+    }
+  }
+
+  async function enqueueTrack(idx) {
+    const track = _searchResults[idx];
+    if (!track) return;
+    try {
+      const resp = await apiFetch('/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: track.url }),
+      });
+      const data = await resp.json();
+      if (data.position) {
+        const statusEl = document.getElementById('search-status');
+        statusEl.textContent = `Queued at #${data.position}: ${data.track?.title || track.title}`;
+        statusEl.style.display = '';
+        // Clear results after successful queue
+        setTimeout(() => {
+          document.getElementById('search-results').innerHTML = '';
+          document.getElementById('search-input').value = '';
+          statusEl.style.display = 'none';
+        }, 3000);
+      }
+    } catch (e) {
+      document.getElementById('search-status').textContent = 'Failed to queue. Try again.';
+      document.getElementById('search-status').style.display = '';
+    }
+  }
+
+  function fmtDuration(secs) {
+    if (!secs) return '';
+    const m = Math.floor(secs / 60);
+    const s = String(secs % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  async function removeTrack(trackId) {
+    const resp = await apiFetch('/queue/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track_id: trackId }),
+    });
+    // 409 = track already gone — server returns actual state to resync
+    if (resp.status === 409) {
+      try { renderQueue(await resp.json()); } catch {}
+    }
+  }
+
+  async function moveTrack(id, newPos) {
+    await apiFetch('/queue/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track_id: id, position: newPos }),
+    });
+  }
+
+  async function togglePauseRequests() {
+    const resp = await apiFetch('/queue/pause-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused: !_requestsPaused }),
+    });
+    if (!resp.ok) {
+      try { const d = await resp.json(); if (d) renderQueue(d); } catch {}
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
