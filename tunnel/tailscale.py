@@ -3,6 +3,17 @@ Tailscale Funnel tunnel.
 
 Requires Tailscale to be installed and authenticated independently.
 URL is stable across restarts; no PII in the hostname.
+
+Funnel provisions its TLS cert via Let's Encrypt.  Let's Encrypt's own
+"duplicate certificate" rate limit — 5 certs per exact set of domains per
+168 hours — is well-documented and can be hit by repeated funnel restarts,
+surfacing as an ACME error like:
+    "429 urn:ietf:params:acme:error:rateLimited: ... too many certificates
+    (5) already issued for this exact set of domains in the last 168 hours"
+sometimes with an exact "retry after <RFC3339 timestamp>".  Unlike
+Cloudflare's undocumented quick-tunnel rate limit, this window and count
+are officially published, so a precise "retry after" timestamp (when
+present) is preferred over the 168h fallback.
 """
 
 from __future__ import annotations
@@ -18,6 +29,12 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 from tunnel.base import TunnelBase  # noqa: E402
 
 URL_PATTERN = re.compile(r"https://[a-z0-9-]+\.ts\.net(?:/\S*)?")
+_LETSENCRYPT_LIMIT_PATTERN = re.compile(r"rateLimited|too many certificates", re.IGNORECASE)
+_RETRY_AFTER_PATTERN = re.compile(r"retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)")
+# Let's Encrypt's officially documented duplicate-certificate window — a
+# safe upper bound even though the actual reset may be sooner depending on
+# when within that window the previous certs were issued.
+_LETSENCRYPT_COOLDOWN_SECONDS = 168 * 3600
 
 
 class TailscaleTunnel(TunnelBase):
@@ -54,6 +71,31 @@ class TailscaleTunnel(TunnelBase):
                 creationflags=_NO_WINDOW,
             )
             for line in self._proc.stdout:
+                if _LETSENCRYPT_LIMIT_PATTERN.search(line):
+                    watchdog.cancel()
+                    until = None
+                    retry_match = _RETRY_AFTER_PATTERN.search(line)
+                    if retry_match:
+                        import datetime
+                        try:
+                            until = datetime.datetime.strptime(
+                                retry_match.group(1), "%Y-%m-%dT%H:%M:%S.%fZ"
+                            ).replace(tzinfo=datetime.timezone.utc).timestamp()
+                        except ValueError:
+                            until = None
+                    if until is not None:
+                        self._emit_rate_limited(line.strip(), until=until)
+                    else:
+                        # No precise "retry after" in the message — fall back
+                        # to Let's Encrypt's documented window, NOT the base
+                        # class's generic default (that's sized for
+                        # Cloudflare's undocumented ~31min quick-tunnel
+                        # limit, wildly wrong for a 168h cert-issuance one).
+                        self._emit_rate_limited(
+                            line.strip(), cooldown_seconds=_LETSENCRYPT_COOLDOWN_SECONDS
+                        )
+                    self._do_stop()
+                    return
                 m = URL_PATTERN.search(line)
                 if m and not self.public_url:
                     watchdog.cancel()

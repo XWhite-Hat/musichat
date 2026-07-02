@@ -194,6 +194,11 @@ class ServerConfig:
     ngrok_authtoken: str = ""
     ngrok_domain: str = ""
     cloudflare_accepted_tos: bool = False
+    # Per-provider lockouts (e.g. Cloudflare rate-limiting tunnel creation).
+    # mode -> {"until": <unix ts>, "reason": <str>}.  Persisted so a lockout
+    # survives an app restart instead of just immediately retrying into the
+    # same rate limit; cleared automatically once "until" has passed.
+    tunnel_lockouts: dict = field(default_factory=dict)
 
 
 @dataclass

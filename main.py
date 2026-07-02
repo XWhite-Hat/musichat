@@ -19,6 +19,7 @@ import os
 import secrets
 import sys
 import threading
+import time
 
 
 def _load_dotenv() -> None:
@@ -114,6 +115,51 @@ def _stop_tunnel(tunnel_ref: list) -> None:
         tunnel_ref[0] = None
 
 
+def _get_active_lockout(cfg, mode: str) -> "dict | None":
+    """
+    Return the lockout record for `mode` (e.g. {"until": ts, "reason": str})
+    if one is still active, auto-clearing (and persisting the clear) once its
+    expiry has passed.  Centralizing the expiry check here means both the
+    startup path and any later status query see the same up-to-date state —
+    a stale lockout can never linger just because nothing happened to poll it.
+    """
+    lockout = cfg.server.tunnel_lockouts.get(mode)
+    if not lockout:
+        return None
+    if time.time() >= lockout.get("until", 0):
+        del cfg.server.tunnel_lockouts[mode]
+        save_config(cfg)
+        return None
+    return lockout
+
+
+def _arm_lockout_clear_timer(cfg, mode: str) -> None:
+    """
+    Schedule the lockout for `mode` to clear itself and refresh the settings
+    page the moment it expires, so anyone watching doesn't need to reopen or
+    refresh anything once the cooldown is over.  This is on top of (not
+    instead of) the lazy check in _get_active_lockout — belt and suspenders.
+    """
+    lockout = cfg.server.tunnel_lockouts.get(mode)
+    if not lockout:
+        return
+    until = lockout["until"]
+    remaining = max(0.0, until - time.time())
+
+    def _clear() -> None:
+        # Only clear if this is still the SAME lockout — don't clobber a
+        # newer one (e.g. hit the rate limit again) or a manual change.
+        current = cfg.server.tunnel_lockouts.get(mode)
+        if current and current.get("until") == until:
+            del cfg.server.tunnel_lockouts[mode]
+            save_config(cfg)
+        from server.settings_app import broadcast_to_settings
+        broadcast_to_settings({"type": "tunnel_status", "status": "offline",
+                                "url": None, "online": False, "mode": mode})
+
+    threading.Timer(remaining, _clear).start()
+
+
 def _start_tunnel(cfg, window: MainWindow, tunnel_ref: list) -> None:
     """
     Build and start the tunnel for the current config.
@@ -126,6 +172,25 @@ def _start_tunnel(cfg, window: MainWindow, tunnel_ref: list) -> None:
 
     if not mode or mode == "none":
         return  # Tunnel disabled — stays grey, mod panel only reachable on LAN/localhost
+
+    lockout = _get_active_lockout(cfg, mode)
+    if lockout:
+        # Provider rejected us as rate-limited last time — don't even try
+        # again until the cooldown is over.  Desktop LED stays a plain
+        # "error" (the status bar is too narrow for anything useful here);
+        # the settings page shows the specific reason and when it clears.
+        window.set_tunnel_status("error", "red")
+        from server.settings_app import broadcast_to_settings
+        broadcast_to_settings({
+            "type": "tunnel_status",
+            "status": "rate_limited",
+            "url": None, "online": False,
+            "error": lockout.get("reason", "rate limited"),
+            "locked_until": lockout.get("until"),
+            "mode": mode,
+        })
+        _arm_lockout_clear_timer(cfg, mode)
+        return
 
     if mode == "cloudflare":
         if not cfg.server.cloudflare_accepted_tos:
@@ -189,14 +254,37 @@ def _start_tunnel(cfg, window: MainWindow, tunnel_ref: list) -> None:
     def on_progress(msg: str) -> None:
         # Non-error status update — the tunnel hasn't failed, but a
         # verification/wait window can take a while and shouldn't look stuck.
-        _gui(lambda: window.set_tunnel_status(msg[:60], "yellow"))
+        # The desktop status bar is too narrow for detailed progress text
+        # (DNS diagnostics, attempt counters, etc.) — keep it to a plain
+        # "connecting..."; the settings page gets the full message below.
+        _gui(lambda: window.set_tunnel_status("connecting...", "yellow"))
         from server.settings_app import broadcast_to_settings
         broadcast_to_settings({"type": "tunnel_status", "status": "verifying",
                                 "url": None, "online": False, "error": msg})
 
+    def on_rate_limited(until: float, reason: str) -> None:
+        # Persist the lockout so it survives an app restart, disables this
+        # provider's auto-start until it clears, and is visible even if the
+        # settings page wasn't open when it happened.
+        cfg.server.tunnel_lockouts[mode] = {"until": until, "reason": reason}
+        save_config(cfg)
+        tunnel_ref[0] = None
+        _gui(lambda: window.set_tunnel_status("error", "red"))
+        from server.settings_app import broadcast_to_settings
+        broadcast_to_settings({
+            "type": "tunnel_status",
+            "status": "rate_limited",
+            "url": None, "online": False,
+            "error": reason,
+            "locked_until": until,
+            "mode": mode,
+        })
+        _arm_lockout_clear_timer(cfg, mode)
+
     t.on_url_assigned = on_url
     t.on_error = on_err
     t.on_progress = on_progress
+    t.on_rate_limited = on_rate_limited
     tunnel_ref[0] = t
     service = _service_labels.get(mode, "tunnel")
     window.set_tunnel_status(f"{service}: connecting", "yellow")
@@ -1009,6 +1097,11 @@ def main() -> int:
         # Sync desktop button — idempotent when triggered from the button itself,
         # required when triggered from the mod panel (different thread).
         _gui(lambda p=paused: window._mode_bar.set_requests_paused(p))
+        # Sync every connected mod panel too — this callback fires from BOTH
+        # the desktop toggle and the mod panel's own POST, so without this a
+        # change made from one side (e.g. the desktop app) never reaches an
+        # already-open mod panel, which just sits showing the stale state.
+        queue_routes.schedule_broadcast()
         if (
             cfg.twitch.channel_points_enabled
             and cfg.twitch.channel_points_reward_id

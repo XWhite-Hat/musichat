@@ -59,6 +59,32 @@ def _token_rate_ok(ip: str) -> bool:
     return True
 
 
+def _real_client_ip(request: Request) -> str:
+    """
+    Return the actual remote caller's IP, not cloudflared's own local
+    connection.  Tunnel traffic reaches this server via a loopback TCP hop
+    from the cloudflared connector, so request.client.host is 127.0.0.1 for
+    every mod regardless of their real IP — making the rate limiter below a
+    single shared bucket for all remote users instead of a per-IP one.
+    Cloudflare's edge sets CF-Connecting-IP on every tunnelled request (the
+    same header the Worker already trusts for its own rate limiting), so
+    that's the real value once traffic has passed through the tunnel.
+
+    Only trusted when the direct TCP peer actually IS loopback — this server
+    binds 127.0.0.1 by default, so any other peer already required running
+    code on this machine to connect at all, at which point a forged header
+    is the least of the problems.  Trusting it unconditionally from any peer
+    would let a non-loopback caller claim an arbitrary IP on every request
+    and dodge the limit entirely.
+    """
+    peer = request.client.host if request.client else ""
+    if peer in ("127.0.0.1", "::1"):
+        forwarded = request.headers.get("CF-Connecting-IP")
+        if forwarded:
+            return forwarded
+    return peer or "unknown"
+
+
 def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
     app = FastAPI(title="StreamDeck Mod Panel", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -324,7 +350,7 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
           access_token was held by the Worker; claim it via /mod-exchange.
           Helix calls routed through Worker /userinfo + /is-mod.
         """
-        client_ip = (request.client.host if request.client else "") or "unknown"
+        client_ip = _real_client_ip(request)
         if not _token_rate_ok(client_ip):
             return JSONResponse({"error": "rate_limited"}, status_code=429)
 

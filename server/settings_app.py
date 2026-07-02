@@ -77,14 +77,18 @@ _settings_ws_manager: "Optional[_WSManager]" = None
 # button as if nothing were wrong.
 #
 # status is the authoritative field for the settings page's UI logic:
-#   "offline"     — not running, safe to start
-#   "connecting"  — start requested, no URL confirmed yet
-#   "verifying"   — URL found, confirming it actually routes traffic
-#   "live"        — confirmed reachable
-#   "restarting"  — self-healing after a failed reachability check
-#   "failed"      — self-heal exhausted its retry budget; needs manual restart
+#   "offline"       — not running, safe to start
+#   "connecting"    — start requested, no URL confirmed yet
+#   "verifying"     — URL found, confirming it actually routes traffic
+#   "live"          — confirmed reachable
+#   "restarting"    — self-healing after a failed reachability check
+#   "failed"        — self-heal exhausted its retry budget; needs manual restart
+#   "rate_limited"  — provider rejected tunnel creation outright; locked out
+#                     until "locked_until" (unix ts) — see tunnel_lockouts in
+#                     ServerConfig, which is what actually persists this
 _tunnel_status: dict = {
     "status": "offline", "url": None, "online": False, "error": None, "fatal": False,
+    "locked_until": None,
 }
 
 
@@ -109,6 +113,7 @@ def broadcast_to_settings(msg: dict) -> None:
             "online": online,
             "error": msg.get("error"),
             "fatal": fatal,
+            "locked_until": msg.get("locked_until"),
         }
     if _settings_ws_manager is not None:
         _settings_ws_manager.broadcast_sync(msg)
@@ -876,13 +881,25 @@ def create_settings_app(
         if not tunnel_start_cb:
             return JSONResponse({"error": "tunnel control not available"}, status_code=503)
         # Defense in depth — the settings page already disables the Start
-        # button while connecting/live/restarting, but reject server-side too
-        # (stale tab, double-click, direct API call) rather than tearing down
-        # an in-progress attempt just to spawn an identical one.
-        if _tunnel_status.get("status") in ("connecting", "live", "restarting"):
+        # button while connecting/verifying/live/restarting, but reject
+        # server-side too (stale tab, double-click, direct API call) rather
+        # than tearing down an in-progress attempt just to spawn an identical
+        # one.
+        if _tunnel_status.get("status") in ("connecting", "verifying", "live", "restarting"):
             return JSONResponse(
                 {"error": f"tunnel is already {_tunnel_status['status']}"}, status_code=409
             )
+        # Provider-side lockout (e.g. Cloudflare rate-limited tunnel
+        # creation) — don't even try until it clears.  Same check main.py's
+        # _start_tunnel does at startup; this covers the manual-click path.
+        import time as _time
+        lockout = cfg.server.tunnel_lockouts.get(cfg.server.tunnel_mode)
+        if lockout and lockout.get("until", 0) > _time.time():
+            return JSONResponse({
+                "error": "rate_limited",
+                "reason": lockout.get("reason"),
+                "until": lockout.get("until"),
+            }, status_code=429)
         import threading as _t
         _t.Thread(target=tunnel_start_cb, daemon=True, name="TunnelStart").start()
         return {"ok": True, "message": "Starting tunnel — URL will arrive via WebSocket"}

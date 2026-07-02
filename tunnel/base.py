@@ -15,11 +15,25 @@ class TunnelBase(ABC):
     """
 
     # Health-check retry budget before giving up on a just-assigned URL.
-    # Kept short — this is a plain unauthenticated GET, not a real workload —
-    # so a genuinely dead tunnel is reported quickly instead of sitting silent.
-    _HEALTH_RETRIES = 6
+    # A freshly-minted *.trycloudflare.com hostname can take real time to
+    # become resolvable everywhere (DNS propagation, negative-cache TTLs on
+    # the local resolver) — observed in practice as NameResolutionError /
+    # getaddrinfo failures for the first 10-20s.  This matters a lot here:
+    # giving up too early means *restarting*, which mints a brand-new random
+    # hostname with the exact same propagation lag — a loop that never
+    # actually gets ahead of the problem.  Patient retries against the SAME
+    # hostname are far more likely to succeed than a restart.
+    _HEALTH_RETRIES = 15
     _HEALTH_TIMEOUT = 3.0       # seconds, per request
-    _HEALTH_RETRY_DELAY = 2.0   # seconds, between attempts
+    _HEALTH_RETRY_DELAY = 3.0   # seconds, between attempts
+    # Cloudflare's own "couldn't reach your origin" edge error codes — the
+    # only responses that actually mean the tunnel isn't routing traffic.
+    # Anything else (200, 404, 401, 500, ...) proves our own local server
+    # answered the request, which is all this check needs to confirm.  We
+    # deliberately do NOT require a 200 from the specific probed route —
+    # that would also fail if that route's behavior/auth ever changes,
+    # which has nothing to do with whether the tunnel itself is working.
+    _CLOUDFLARE_ORIGIN_ERROR_CODES = {521, 522, 523, 524, 525, 526, 530}
     # How long to wait for the tunnel binary to print a URL at all before
     # treating it as stuck.  Without this, a binary that hangs or never
     # prints the expected line blocks forever with zero feedback.
@@ -33,6 +47,14 @@ class TunnelBase(ABC):
     # Cloudflare.  Doubles each attempt, capped at _RESTART_MAX_DELAY.
     _RESTART_BASE_DELAY = 5.0   # seconds, before the 1st restart
     _RESTART_MAX_DELAY = 60.0
+    # Provider-side rate-limiting (e.g. Cloudflare's quick-tunnel creation
+    # API) isn't documented with an official cooldown duration — this is an
+    # observed value, not a published guarantee.  Retrying sooner than this
+    # is pointless (the request will just be rejected again) and repeatedly
+    # hammering a rate limit risks extending it, so callers should stop
+    # attempting entirely rather than folding this into the normal
+    # restart/backoff cycle.
+    _RATE_LIMIT_COOLDOWN_SECONDS = 31 * 60
 
     def __init__(self, local_port: int) -> None:
         self.local_port = local_port
@@ -46,6 +68,12 @@ class TunnelBase(ABC):
         # "verifying... 2/6") so a long verification/wait window is never
         # silent, even when nothing has actually gone wrong yet.
         self.on_progress: Optional[Callable[[str], None]] = None
+        # on_rate_limited(until_unix_ts, reason) — the provider itself
+        # rejected tunnel creation as rate-limited.  Distinct from on_error
+        # because the correct response isn't "retry with backoff", it's
+        # "stop entirely until this specific time" — a persistent, provider-
+        # scoped lockout the caller is expected to remember across restarts.
+        self.on_rate_limited: Optional[Callable[[float, str], None]] = None
         self._restart_count = 0
         # Set by stop() — checked by the self-heal loop so a stop requested
         # while it's sleeping in a backoff window actually cancels the
@@ -64,6 +92,43 @@ class TunnelBase(ABC):
         print(f"[tunnel] {msg}")
         if self.on_progress:
             self.on_progress(msg)
+
+    def _emit_rate_limited(
+        self,
+        reason: str,
+        cooldown_seconds: Optional[float] = None,
+        until: Optional[float] = None,
+    ) -> None:
+        """
+        Provider rejected tunnel creation as rate-limited.  Marks a lockout
+        and stops entirely — no restart, no further attempts — since
+        retrying immediately would just repeat the exact same rejection.
+
+        `until` lets a caller pass a precise unlock time parsed straight out
+        of the provider's own response (e.g. Let's Encrypt sometimes states
+        an exact "retry after" timestamp).  Without one, `cooldown_seconds`
+        (defaulting to _RATE_LIMIT_COOLDOWN_SECONDS) sets a duration from
+        now — different providers can have wildly different real cooldowns,
+        so this is per-call rather than a single shared constant.
+        """
+        import datetime
+        if until is None:
+            if cooldown_seconds is None:
+                cooldown_seconds = self._RATE_LIMIT_COOLDOWN_SECONDS
+            until = time.time() + cooldown_seconds
+        when = datetime.datetime.fromtimestamp(until).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[tunnel] RATE LIMITED: {reason} — not retrying until {when}")
+        if self.on_rate_limited:
+            self.on_rate_limited(until, reason)
+
+    def _announce_live(self, url: str) -> None:
+        """Confirmed reachable — record it, reset the restart counter, and
+        make sure there's an unambiguous success line in the console."""
+        print(f"[tunnel] confirmed live: {url}")
+        self.public_url = url
+        self._restart_count = 0
+        if self.on_url_assigned:
+            self.on_url_assigned(url)
 
     def start(self) -> None:
         """Start the tunnel. Concrete — clears the stop flag, then delegates."""
@@ -150,6 +215,34 @@ class TunnelBase(ABC):
         self.stop()
         self.start()
 
+    def _dns_resolves_via_doh(self, hostname: str) -> bool:
+        """
+        Check whether `hostname` resolves using Cloudflare's DNS-over-HTTPS
+        endpoint, hit by IP (1.1.1.1) so this never depends on the local
+        machine's own resolver or its cache.
+
+        Exists because a browser can resolve a tunnel URL just fine (many
+        browsers default to their own DoH) while this process's getaddrinfo-
+        based lookup keeps failing on the exact same hostname — the local
+        OS resolver cached an early failed lookup (made before the record
+        existed) and won't re-query until its own negative-cache TTL expires,
+        no matter how many times *we* retry.  This lets us tell "genuinely
+        not resolvable anywhere yet" apart from "resolvable, just not to
+        this machine's stale local cache" — restarting the tunnel fixes
+        neither case, but only the first one actually needs it.
+        """
+        import requests
+        try:
+            resp = requests.get(
+                "https://1.1.1.1/dns-query",
+                params={"name": hostname, "type": "A"},
+                headers={"Accept": "application/dns-json"},
+                timeout=3,
+            )
+            return resp.ok and bool(resp.json().get("Answer"))
+        except Exception:
+            return False
+
     def _verify_and_announce(self, url: str) -> None:
         """
         Confirm the tunnel actually proxies to the local server before treating
@@ -159,32 +252,74 @@ class TunnelBase(ABC):
         would otherwise be shown as ready when it's actually dead until
         someone notices and restarts the app manually.
 
-        Retries briefly against the mod panel's own unauthenticated
-        /config.js endpoint, reporting progress on every attempt so this
-        never goes silent.  If it never comes up, self-heals by restarting
-        the tunnel process (bounded — see _MAX_RESTARTS).
+        Retries an unauthenticated request against /config.js, but success
+        only requires getting *any* response that isn't one of Cloudflare's
+        own "couldn't reach your origin" edge errors — a 200, 404, or even a
+        401 all prove traffic is reaching our local server end-to-end, which
+        is the only thing this needs to confirm.  Requiring that specific
+        route to return 200 would also fail this check for reasons that have
+        nothing to do with the tunnel (route behavior/auth changes).
+
+        Reports progress on every attempt so this never goes silent.  If it
+        never comes up, self-heals by restarting the tunnel process (bounded
+        — see _MAX_RESTARTS) — unless DNS keeps resolving externally via DoH
+        while our own lookup fails, in which case the deadline is extended
+        instead, since restarting would just mint an equally-fresh,
+        equally-stuck-in-the-same-local-cache hostname.
 
         Call this from the tunnel's worker thread — it blocks for up to
-        _HEALTH_RETRIES * (_HEALTH_TIMEOUT + _HEALTH_RETRY_DELAY) seconds.
+        _HEALTH_RETRIES * (_HEALTH_TIMEOUT + _HEALTH_RETRY_DELAY) seconds,
+        plus up to _MAX_DNS_EXTENSIONS extensions while DoH keeps confirming.
         """
         import requests
+        from urllib.parse import urlparse
 
-        for attempt in range(1, self._HEALTH_RETRIES + 1):
+        hostname = urlparse(url).hostname
+
+        # Substrings from the actual exceptions urllib3/requests raise for a
+        # DNS lookup failure — seen in practice as the dominant cause of
+        # early attempts failing for a hostname that was just minted.
+        _DNS_MARKERS = ("NameResolutionError", "getaddrinfo failed", "Name or service not known")
+        _MAX_DNS_EXTENSIONS = 10  # hard ceiling — don't wait forever even if DoH keeps saying yes
+
+        deadline = time.monotonic() + self._HEALTH_RETRIES * (
+            self._HEALTH_TIMEOUT + self._HEALTH_RETRY_DELAY
+        )
+        extensions = 0
+        attempt = 0
+        while time.monotonic() < deadline:
+            attempt += 1
             if self._stop_requested:
                 return
-            self._emit_progress(
-                f"verifying tunnel is routing traffic... ({attempt}/{self._HEALTH_RETRIES})"
-            )
+            self._emit_progress(f"verifying tunnel is routing traffic... (attempt {attempt})")
             try:
                 resp = requests.get(f"{url}/config.js", timeout=self._HEALTH_TIMEOUT)
-                if resp.ok:
-                    self.public_url = url
-                    self._restart_count = 0
-                    if self.on_url_assigned:
-                        self.on_url_assigned(url)
+                if resp.status_code not in self._CLOUDFLARE_ORIGIN_ERROR_CODES:
+                    self._announce_live(url)
                     return
+                print(
+                    f"[tunnel] health check attempt {attempt}: Cloudflare edge "
+                    f"reports origin unreachable (HTTP {resp.status_code})"
+                )
             except Exception as e:
-                print(f"[tunnel] health check attempt {attempt} failed: {e!r}")
+                reason = repr(e)
+                if any(marker in reason for marker in _DNS_MARKERS):
+                    if hostname and extensions < _MAX_DNS_EXTENSIONS and self._dns_resolves_via_doh(hostname):
+                        extensions += 1
+                        deadline = max(deadline, time.monotonic() + self._HEALTH_RETRY_DELAY * 3)
+                        print(
+                            f"[tunnel] health check attempt {attempt}: DNS resolves "
+                            f"externally (confirmed via DoH) but not yet on this "
+                            f"machine's own resolver — waiting rather than restarting "
+                            f"({reason})"
+                        )
+                    else:
+                        print(
+                            f"[tunnel] health check attempt {attempt}: DNS for the new "
+                            f"tunnel hostname hasn't propagated yet ({reason})"
+                        )
+                else:
+                    print(f"[tunnel] health check attempt {attempt} failed: {reason}")
             time.sleep(self._HEALTH_RETRY_DELAY)
 
         self._restart_or_give_up()

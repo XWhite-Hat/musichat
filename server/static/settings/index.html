@@ -925,6 +925,7 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
           <span id="tunnel-url-display" style="font-size:12px;color:var(--dim);word-break:break-all"></span>
         </div>
         <div id="tunnel-error" style="display:none;font-size:12px;color:var(--danger);margin-top:6px;white-space:pre-wrap;word-break:break-all;line-height:1.5"></div>
+        <div id="tunnel-lockout" style="display:none;font-size:12px;color:var(--danger);margin-top:6px;line-height:1.5;padding:8px;border:1px solid var(--danger);border-radius:4px;background:rgba(255,68,68,0.08)"></div>
         <div class="hint" style="margin-top:10px">
           <strong>Local panel URL: </strong><span id="local-panel-url" style="font-family:monospace"></span>
           <br><span style="color:var(--danger);font-size:11px">⚠ For local use only — this URL will not work for your mods. Share the tunnel URL above instead.</span>
@@ -2211,9 +2212,24 @@ function connectWS() {
         break;
       }
       case 'tunnel_status':
+        // A lockout that happens while this page is already open isn't in
+        // the config snapshot fetched at load — patch it in directly so
+        // _renderTunnelControls() (which reads config.server.tunnel_lockouts)
+        // picks it up without needing a reload.
+        if (msg.mode) {
+          config.server = config.server || {};
+          config.server.tunnel_lockouts = config.server.tunnel_lockouts || {};
+          if (msg.status === 'rate_limited' && msg.locked_until) {
+            config.server.tunnel_lockouts[msg.mode] = { until: msg.locked_until, reason: msg.error || '' };
+          } else if (msg.status === 'offline') {
+            delete config.server.tunnel_lockouts[msg.mode];
+          }
+        }
         setTunnelStatus(msg.url || null, msg.status, msg.error || null);
         if (msg.status === 'live' && msg.url) {
           toast(`tunnel live: ${msg.url}`, 'ok');
+        } else if (msg.status === 'rate_limited') {
+          toast(`${msg.mode || 'tunnel'} rate-limited — see tunnel section for details`, 'error');
         } else if (msg.status === 'failed') {
           toast('tunnel auto-start failed — see tunnel section for details', 'error');
         } else if (msg.error) {
@@ -2974,6 +2990,10 @@ function updateTunnelFields() {
     const urlEl = document.getElementById('self-hosted-url');
     if (urlEl) urlEl.textContent = `http://${host}:${port}`;
   }
+  // Re-evaluate lockout state for whichever mode is now selected — a
+  // provider-specific lockout (e.g. Cloudflare rate-limited) must not
+  // disable Start for a *different* provider the user switches to.
+  _renderTunnelControls();
 }
 
 // ── Tunnel start/stop ──────────────────────────────────────────────────────────
@@ -3006,14 +3026,49 @@ async function tunnelStop() {
   setTunnelStatus(null, 'offline');
 }
 
-// status: 'offline' | 'connecting' | 'verifying' | 'live' | 'restarting' | 'failed'
+// status: 'offline' | 'connecting' | 'verifying' | 'live' | 'restarting' | 'failed' | 'rate_limited'
+let _lastTunnelStatus = { url: null, status: 'offline', error: null };
+
 function setTunnelStatus(url, status, error) {
-  const urlEl    = document.getElementById('tunnel-url-display');
+  _lastTunnelStatus = { url, status: status || 'offline', error };
+  _renderTunnelControls();
+}
+
+// Re-renders the tunnel controls from _lastTunnelStatus, but a provider
+// lockout for the *currently selected* mode always wins — nothing else
+// (a stale "restarting" from before the lockout hit, a live status push for
+// a different provider, etc.) should be allowed to re-enable Start while
+// this mode is still locked out.
+function _renderTunnelControls() {
   const startBtn = document.getElementById('tunnel-start-btn');
   const stopBtn  = document.getElementById('tunnel-stop-btn');
+  const urlEl    = document.getElementById('tunnel-url-display');
   const errEl    = document.getElementById('tunnel-error');
+  const lockEl   = document.getElementById('tunnel-lockout');
+  if (!startBtn || !stopBtn || !urlEl || !errEl || !lockEl) return;
 
-  status = status || 'offline';
+  const mode = document.getElementById('tunnel-mode')?.value || '';
+  const lockout = ((config.server || {}).tunnel_lockouts || {})[mode];
+  const now = Date.now() / 1000;
+
+  if (lockout && lockout.until > now) {
+    const when = new Date(lockout.until * 1000).toLocaleTimeString();
+    const mins = Math.max(1, Math.round((lockout.until - now) / 60));
+    lockEl.textContent =
+      `${mode} rejected tunnel creation as rate-limited` +
+      (lockout.reason ? ` (${lockout.reason})` : '') +
+      `. Auto-start is disabled for ${mode} until then — you can try again at ` +
+      `${when} (in about ${mins} min), or switch to a different tunnel provider now.`;
+    lockEl.style.display = '';
+    errEl.style.display = 'none';
+    urlEl.textContent = '';
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'none';
+    return;
+  }
+  lockEl.style.display = 'none';
+
+  const { url, status, error } = _lastTunnelStatus;
 
   const STATUS_TEXT = {
     offline:    '',
@@ -3055,6 +3110,12 @@ function setTunnelStatus(url, status, error) {
     errEl.style.display = 'none';
   }
 }
+
+// A lockout clearing while nobody touched the page (no mode change, no WS
+// push happened to arrive right at expiry) would otherwise leave the stale
+// "rate-limited" banner up indefinitely — recheck periodically so it
+// disappears within a few seconds of actually expiring.
+setInterval(_renderTunnelControls, 15000);
 
 // ── Gradient preview ───────────────────────────────────────────────────────────
 function updateGradientPreview() {
