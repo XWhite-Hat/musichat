@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -55,6 +56,12 @@ def run() -> None:
         # Running from source — PySide6 is in the venv, use legacy default dir
         os.environ.setdefault("MUSICHAT_DATA_DIR", _DEFAULT_DATA_DIR)
         return
+
+    # Disposable-subprocess entry point for _pyside6_import_ok() below — must
+    # be checked before anything else touches bootstrap.json.
+    if len(sys.argv) >= 3 and sys.argv[1] == "--pyside6-smoke-test":
+        _run_smoke_test_subprocess(sys.argv[2])
+        return  # unreachable — _run_smoke_test_subprocess always exits
 
     cfg_path = _bootstrap_config_path()
     cfg      = _read_bootstrap_config(cfg_path)
@@ -94,10 +101,6 @@ def run() -> None:
                 _show_abort_notice()
                 sys.exit(0)
 
-    os.environ["MUSICHAT_DATA_DIR"] = data_dir
-    _ensure_env_file(Path(data_dir))
-    _add_pyside6_to_path(Path(data_dir))
-
     # The checks above only prove the expected files exist — never that they
     # actually load.  A stale install left by a different/older MusicHat
     # version, an interrupted "remove & exit" (deferred deletion didn't
@@ -107,46 +110,77 @@ def run() -> None:
     # gets the same clear recovery dialog every other case does — instead of
     # an opaque crash deep inside the app that nobody can diagnose.
     #
-    # Retried a few times before giving up: freshly-downloaded, unsigned
-    # DLLs are exactly what Windows Defender's real-time on-access scanner
-    # inspects on first LoadLibrary call, which can transiently surface as
-    # "DLL load failed / module not found" on the very first launch after
-    # install and then never again once the scan completes.  Confirmed on
-    # this machine — a failing install re-imported seconds later, completely
-    # unmodified, succeeded.  A short retry loop absorbs that race instead
-    # of sending users into an unnecessary repair/re-download.
+    # This check runs in a disposable subprocess (_pyside6_import_ok), not
+    # here.  It must not run in this process: verifying it here would mean
+    # calling _add_pyside6_to_path()'s ctypes.WinDLL() preload (see its
+    # docstring) just to test importability, and those DLLs stay locked in
+    # this process for the rest of its life once loaded.  If the test then
+    # failed and recovery tried to wipe and re-extract that same directory
+    # in this same process, the wipe would silently fail on the locked files
+    # and the re-extraction would hang trying to overwrite them — this was
+    # reproduced directly: a repair triggered right after a fresh install
+    # hung forever re-extracting shiboken6.  A subprocess's locks vanish the
+    # instant it exits, so the real process here never touches a locked file.
     #
-    # If every attempt fails, sys.modules will have cached whatever
-    # partially imported before the last exception, so retrying the *same*
-    # import in this process after a repair would just return the stale
-    # cached module rather than the freshly-repaired files.  Recovery
-    # instead asks for a restart, which starts clean.
-    _last_exc: Optional[BaseException] = None
+    # Retried a few times before giving up: freshly-written, unsigned DLLs
+    # can transiently fail to load right after being written (e.g. while an
+    # antivirus on-access scan is still inspecting them) and succeed moments
+    # later with no change on disk.
+    ok = False
     for _attempt in range(1, 4):
-        try:
-            import shiboken6            # noqa: F401
-            from PySide6 import QtCore  # noqa: F401
-            _last_exc = None
+        if _pyside6_import_ok(data_dir):
+            ok = True
             break
-        except Exception as exc:
-            _last_exc = exc
-            print(
-                f"[bootstrap] PySide6 import smoke-test attempt {_attempt}/3 "
-                f"failed: {exc!r}",
-                flush=True,
-            )
-            if _attempt < 3:
-                time.sleep(1.5)
+        print(f"[bootstrap] PySide6 import check attempt {_attempt}/3 failed", flush=True)
+        if _attempt < 3:
+            time.sleep(1.5)
 
-    if _last_exc is not None:
-        if _run_recovery(data_dir, cfg_path, reason="import_failed"):
-            _show_restart_notice()
-        else:
+    if not ok:
+        data_dir = _run_recovery(data_dir, cfg_path, reason="import_failed")
+        if not data_dir or not _pyside6_import_ok(data_dir):
             _show_abort_notice()
-        sys.exit(1)
+            sys.exit(1)
+
+    os.environ["MUSICHAT_DATA_DIR"] = data_dir
+    _ensure_env_file(Path(data_dir))
+    _add_pyside6_to_path(Path(data_dir))
 
 
 # ── Internal ───────────────────────────────────────────────────────────────────
+
+def _pyside6_import_ok(data_dir: str) -> bool:
+    """
+    Verify PySide6 actually imports from *data_dir*, out-of-process.
+
+    Spawns this same frozen exe with a hidden "--pyside6-smoke-test" mode
+    (handled at the top of run()) that does the import and exits 0/1.  See
+    the comment in run() for why this must not happen in the real process.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "--pyside6-smoke-test", data_dir],
+            timeout=30,
+            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
+        )
+        return result.returncode == 0
+    except Exception as exc:
+        print(f"[bootstrap] smoke-test subprocess failed to run: {exc!r}", flush=True)
+        return False
+
+
+def _run_smoke_test_subprocess(data_dir: str) -> None:
+    """Entry point when this exe is invoked as the disposable subprocess
+    spawned by _pyside6_import_ok().  Exits 0 on success, 1 on failure —
+    whatever DLLs get locked here are released the moment this exits."""
+    _add_pyside6_to_path(Path(data_dir))
+    try:
+        import shiboken6            # noqa: F401
+        from PySide6 import QtCore  # noqa: F401
+    except Exception as exc:
+        print(f"[bootstrap] smoke-test subprocess import failed: {exc!r}", flush=True)
+        sys.exit(1)
+    sys.exit(0)
+
 
 def _read_bootstrap_config(path: Path) -> Optional[dict]:
     try:
@@ -348,22 +382,3 @@ def _show_abort_notice() -> None:
         print("[bootstrap] MusicHat cannot start: PySide6 not found.", flush=True)
 
 
-def _show_restart_notice() -> None:
-    """
-    Shown after a successful PySide6 repair.  A restart is required rather
-    than continuing in this process — sys.modules would still be caching
-    whatever partially imported before the earlier failure, not the
-    freshly-repaired files on disk.
-    """
-    try:
-        import tkinter as tk
-        import tkinter.messagebox as mb
-        root = tk.Tk()
-        root.withdraw()
-        mb.showinfo(
-            "MusicHat — Repaired",
-            "PySide6 has been repaired.\n\nPlease restart MusicHat.",
-        )
-        root.destroy()
-    except Exception:
-        print("[bootstrap] PySide6 repaired — please restart MusicHat.", flush=True)
