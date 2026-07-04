@@ -44,11 +44,25 @@ try:
 except Exception:
     ctk_datas, ctk_binaries, ctk_hiddenimports = [], [], []
 
+# python3.dll — the version-agnostic "stable ABI" forwarder DLL.  PySide6 and
+# shiboken6 ship as abi3 wheels, so their native DLLs (pyside6.abi3.dll,
+# shiboken6.abi3.dll, ...) link against this at load time.  It's normally
+# only bundled by PyInstaller as a side effect of some *other* dependency
+# also happening to need it (e.g. the `cryptography` package's Rust
+# extension) — so whether it ends up in the frozen exe has silently depended
+# on exactly which unrelated packages happen to be installed in the build
+# environment.  That's exactly the gap that let a clean CI build (a leaner
+# dependency set than a long-lived local dev venv) ship without it, while a
+# local build with more packages installed shipped fine purely by accident.
+# Bundle it explicitly so every build has it, deterministically.
+_python3_dll = Path(sys.base_prefix) / "python3.dll"
+_extra_binaries = [(str(_python3_dll), ".")] if _python3_dll.is_file() else []
+
 # ── Analysis ───────────────────────────────────────────────────────────────────
 a = Analysis(
     [str(HERE / "launcher.py")],   # bootstrap entry point (not main.py directly)
     pathex=[str(HERE)],
-    binaries=[*ctk_binaries],
+    binaries=[*ctk_binaries, *_extra_binaries],
     datas=[
         # (source, destination_in_bundle)
         (str(HERE / "server" / "static"), "server/static"),
