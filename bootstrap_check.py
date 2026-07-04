@@ -127,7 +127,10 @@ def read_bootstrap_config() -> dict:
 def _run_setup_wizard(cfg_path: Path) -> Optional[str]:
     from bootstrap_ui import run_setup_wizard
 
-    default = str(Path.home() / "Documents" / "MusicHat")
+    # Just the parent — the wizard's "create a MusicHat folder inside this
+    # location" checkbox (checked by default) appends the "MusicHat" segment
+    # itself.  Pre-including it here would double it up to .../MusicHat/MusicHat.
+    default = str(Path.home() / "Documents")
     data_dir = run_setup_wizard(default)
     if not data_dir:
         return None

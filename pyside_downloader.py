@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import shutil
 import sys
 import urllib.error
 import urllib.request
@@ -57,6 +58,18 @@ def download_pyside6(
         if progress_cb:
             progress_cb(done, total, msg)
 
+    # Wipe any existing content before extracting.  A stale install left by
+    # a different/older MusicHat version, an interrupted prior download, or
+    # a manual install can otherwise merge with the fresh extraction below —
+    # zipfile.extractall() only overwrites same-named files, it never
+    # removes anything the new wheel set doesn't include.  That leaves a mix
+    # of old- and new-version native DLLs that individually "exist" but
+    # don't actually work together, which surfaces as exactly the kind of
+    # unhelpful "DLL load failed / module not found" error this is meant to
+    # prevent.  A clean slate is the only way to guarantee the extracted
+    # install is internally self-consistent.
+    if target_dir.exists():
+        shutil.rmtree(target_dir, ignore_errors=True)
     target_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Step 1: find the latest version that passes Socket ─────────────────────

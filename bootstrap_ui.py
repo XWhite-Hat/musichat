@@ -19,6 +19,7 @@ Public surface:
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 from pathlib import Path
 from tkinter import filedialog
@@ -42,6 +43,8 @@ _GREEN       = "#22c55e"
 _MUTED       = "#6b7280"
 _DANGER      = "#ef4444"
 
+_MUSICHAT_SUBFOLDER = "MusicHat"
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -52,76 +55,47 @@ def _center(win: ctk.CTk | ctk.CTkToplevel, w: int, h: int) -> None:
     win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
 
-# ── Folder existence check ─────────────────────────────────────────────────────
+# ── Clean-install confirmation ─────────────────────────────────────────────────
+# Replaces the old "keep existing config, optionally reuse PySide6" merge
+# dialog.  Selectively merging with whatever's already on disk is exactly the
+# class of bug that caused stale PySide6 files to coexist with a fresh
+# download (see pyside_downloader.download_pyside6's wipe-before-extract
+# fix) — the simplest way to guarantee a self-consistent install is to never
+# merge at all: detect existing content, warn plainly, wipe it.
 
-def _check_existing_folder(path: str) -> dict:
-    """Return which MusicHat artefacts already exist in *path*."""
-    p = Path(path)
-    return {
-        "has_pyside6":   (p / "pyside6" / "PySide6").is_dir(),
-        "has_config":    (p / "config.json").exists(),
-        "has_playlists": (p / "playlists.json").exists(),
-    }
+class _ConfirmWipeDialog(ctk.CTkToplevel):
+    """Generic Continue/Cancel warning shown before wiping a folder clean.
 
-
-class _ExistingFolderDialog(ctk.CTkToplevel):
-    """
-    Shown when the folder the user picked already contains MusicHat data.
-
-    .proceed  — True if user wants to continue, False/None if cancelled.
-    .use_existing_pyside6 — True if user wants to skip re-download.
+    .proceed — True if the user chose to continue (and accept the wipe).
     """
 
-    def __init__(self, parent: ctk.CTk, existing: dict) -> None:
+    def __init__(self, parent: ctk.CTk, title: str, message: str) -> None:
         super().__init__(parent)
-        self.title("MusicHat — Existing Data Found")
+        self.title(f"MusicHat — {title}")
         self.resizable(False, False)
-        _center(self, 500, 300)
+        _center(self, 480, 260)
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.transient(parent)
         self.grab_set()
 
         self.proceed = False
-        self.use_existing_pyside6 = False
 
-        items = []
-        if existing["has_pyside6"]:
-            items.append("PySide6 UI library")
-        if existing["has_config"]:
-            items.append("config.json (settings)")
-        if existing["has_playlists"]:
-            items.append("playlists.json")
-        bullet_list = "\n".join(f"  •  {i}" for i in items)
-
-        ctk.CTkLabel(self, text="Existing data found", font=_FONT_TITLE).pack(
-            anchor="w", padx=28, pady=(24, 10))
-        ctk.CTkLabel(
-            self,
-            text=f"This folder already contains:\n{bullet_list}\n\n"
-                 "Your existing config and playlists will be kept.",
-            font=_FONT_BODY, justify="left", wraplength=448,
-        ).pack(anchor="w", padx=28, pady=(0, 10))
-
-        self._pyside_var = ctk.BooleanVar(value=existing["has_pyside6"])
-        if existing["has_pyside6"]:
-            ctk.CTkCheckBox(
-                self,
-                text="Use existing PySide6 (skip re-download)",
-                variable=self._pyside_var,
-                font=_FONT_BODY,
-            ).pack(anchor="w", padx=28, pady=(0, 18))
+        ctk.CTkLabel(self, text=title, font=_FONT_TITLE,
+                     text_color=_DANGER).pack(anchor="w", padx=28, pady=(24, 10))
+        ctk.CTkLabel(self, text=message, font=_FONT_BODY, justify="left",
+                     wraplength=424).pack(anchor="w", padx=28, pady=(0, 18))
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.pack(fill="x", padx=28, pady=(0, 20))
         ctk.CTkButton(btn_frame, text="Cancel", width=100,
                       fg_color="transparent", border_width=1,
                       command=self._cancel).pack(side="right", padx=(8, 0))
-        ctk.CTkButton(btn_frame, text="Continue", width=120,
-                      command=self._confirm).pack(side="right")
+        ctk.CTkButton(btn_frame, text="Delete and set up clean", width=200,
+                      fg_color=_DANGER, hover_color="#c0392b",
+                      command=self._confirm).pack(side="right", padx=(8, 0))
 
     def _confirm(self) -> None:
         self.proceed = True
-        self.use_existing_pyside6 = self._pyside_var.get()
         self.destroy()
 
     def _cancel(self) -> None:
@@ -204,6 +178,23 @@ class _SetupWizard(ctk.CTk):
             path_row, text="Browse…", width=90,
             command=self._browse,
         ).pack(side="left", padx=(8, 0))
+
+        self._create_subfolder_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            f,
+            text=f"Create a dedicated '{_MUSICHAT_SUBFOLDER}' folder inside this location",
+            variable=self._create_subfolder_var,
+            font=_FONT_BODY,
+            command=self._update_folder_preview,
+        ).pack(anchor="w", pady=(0, 6))
+
+        self._folder_preview_var = ctk.StringVar(value="")
+        ctk.CTkLabel(
+            f, textvariable=self._folder_preview_var,
+            font=_FONT_HINT, text_color=_MUTED, justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        self._path_var.trace_add("write", lambda *_: self._update_folder_preview())
+        self._update_folder_preview()
 
         ctk.CTkLabel(
             f,
@@ -291,22 +282,73 @@ class _SetupWizard(ctk.CTk):
             self._path_var.set(chosen)
             self._chosen_dir = chosen
 
+    def _resulting_dir(self) -> str:
+        """The actual folder MusicHat will use, accounting for the
+        'create a dedicated folder' checkbox — never the raw picker/entry
+        value on its own."""
+        selected = self._path_var.get().strip()
+        if self._create_subfolder_var.get():
+            return str(Path(selected) / _MUSICHAT_SUBFOLDER)
+        return selected
+
+    def _update_folder_preview(self) -> None:
+        resulting = self._resulting_dir()
+        self._folder_preview_var.set(f"Data will be stored in:  {resulting}" if resulting else "")
+
+    def _confirm_wipe(self, title: str, message: str) -> bool:
+        dlg = _ConfirmWipeDialog(self, title, message)
+        self.wait_window(dlg)
+        return dlg.proceed
+
     def _start_download(self) -> None:
-        self._chosen_dir = self._path_var.get().strip()
-        if not self._chosen_dir:
+        selected = self._path_var.get().strip()
+        if not selected:
             return
 
-        existing = _check_existing_folder(self._chosen_dir)
-        if any(existing.values()):
-            dlg = _ExistingFolderDialog(self, existing)
-            self.wait_window(dlg)
-            if not dlg.proceed:
-                return
-            if dlg.use_existing_pyside6:
-                # PySide6 already in place — skip download, go straight to done.
-                self._show_page(3)
-                return
+        create_subfolder = self._create_subfolder_var.get()
+        resulting_dir = self._resulting_dir()
+        result_path = Path(resulting_dir)
 
+        # Prior, more specific check: the checkbox is about to create a
+        # nested "MusicHat" folder one level down from what was picked — if
+        # that exact nested folder already exists, call it out by name
+        # rather than folding it into the generic "not empty" message below,
+        # since the user may not expect a MusicHat folder to already be
+        # sitting at that nested location (e.g. left over from a previous
+        # install, or a differing MusicHat version).
+        already_confirmed = False
+        if create_subfolder and result_path.exists():
+            if not self._confirm_wipe(
+                "Existing MusicHat Folder Detected",
+                f"An existing '{_MUSICHAT_SUBFOLDER}' folder was found at:\n"
+                f"  {resulting_dir}\n\n"
+                "Continuing will delete everything inside it to ensure a clean install.",
+            ):
+                return
+            already_confirmed = True
+
+        # General check: whatever the final resulting directory ends up
+        # being — the picked folder as-is, or picked-folder/MusicHat — if it
+        # already exists or has anything inside it, a clean install means
+        # wiping it first.  Skipped if the more specific check above already
+        # covered this exact folder.
+        if not already_confirmed:
+            exists = result_path.exists()
+            has_children = exists and any(result_path.iterdir())
+            if exists or has_children:
+                if not self._confirm_wipe(
+                    "Folder Already Exists",
+                    f"The selected folder already exists:\n  {resulting_dir}\n\n"
+                    "Continuing will delete everything inside it to ensure a clean install.",
+                ):
+                    return
+
+        # Confirmed (or nothing to confirm) — wipe if present, then start clean.
+        if result_path.exists():
+            shutil.rmtree(result_path, ignore_errors=True)
+        result_path.mkdir(parents=True, exist_ok=True)
+
+        self._chosen_dir = resulting_dir
         self._cancel_download.clear()
         self._error_label.configure(text="")
         self._retry_btn.pack_forget()
