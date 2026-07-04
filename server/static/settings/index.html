@@ -1223,8 +1223,11 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
         <button class="danger" id="wipe-exit-btn">Remove &amp; exit</button>
         <div class="hint" style="margin-top:6px">
           Wipes all local data — config, tokens, and keys — then closes the
-          app entirely. Nothing will remain on disk or in the OS credential
-          store.
+          app entirely. Nothing will remain in the OS credential store.
+          The data folder (including the PySide6 library, unless you choose
+          to keep it below) is deleted too — if the app has to finish that
+          after it closes, it still completes automatically within a few
+          seconds.
         </div>
       </div>
     </div>

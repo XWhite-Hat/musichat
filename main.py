@@ -105,6 +105,56 @@ def _load_share_tech_mono() -> None:
         QFontDatabase.addApplicationFont(font_path)
 
 
+def _schedule_deferred_delete(path, pid: int) -> None:
+    """
+    Delete *path* only after the process with the given pid has fully exited.
+
+    Needed on Windows because DLLs/.pyd files this process currently has
+    loaded (Qt6Core.dll, Shiboken.pyd, ...) are held under an exclusive lock
+    for as long as this process is alive.  MusicHat's own "remove & exit"
+    feature runs while MusicHat is still running ON PySide6 — calling
+    shutil.rmtree() on pyside6/ at that point silently fails on every locked
+    file if errors are ignored, leaving the exact stale/incompatible install
+    behind that a "clean removal" is supposed to guarantee doesn't happen.
+
+    Spawns a detached helper (a batch script on Windows) that polls for the
+    pid to disappear, then removes the directory and itself.
+    """
+    if sys.platform != "win32":
+        # POSIX allows unlinking files that are still open/mapped — no lock
+        # to work around, so just do it directly.
+        import shutil
+        shutil.rmtree(str(path), ignore_errors=True)
+        return
+
+    import subprocess
+    import tempfile
+
+    path = str(path)
+    script = (
+        "@echo off\r\n"
+        ":wait\r\n"
+        f'tasklist /fi "PID eq {pid}" 2>nul | find "{pid}" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        "    timeout /t 1 /nobreak >nul\r\n"
+        "    goto wait\r\n"
+        ")\r\n"
+        f'rmdir /s /q "{path}" 2>nul\r\n'
+        'del "%~f0"\r\n'
+    )
+    fd, script_path = tempfile.mkstemp(suffix=".bat", prefix="musichat_cleanup_")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(script)
+
+    _DETACHED_PROCESS = 0x00000008
+    _CREATE_NO_WINDOW  = 0x08000000
+    subprocess.Popen(
+        ["cmd", "/c", script_path],
+        creationflags=_DETACHED_PROCESS | _CREATE_NO_WINDOW,
+        close_fds=True,
+    )
+
+
 def _stop_tunnel(tunnel_ref: list) -> None:
     """Stop any currently running tunnel and clear the ref."""
     if tunnel_ref[0] is not None:
@@ -761,20 +811,34 @@ def _start_settings_server(
 
         _cfg_dir = pathlib.Path(CONFIG_PATH).parent
         if _cfg_dir.exists():
-            if remove_pyside6:
-                shutil.rmtree(_cfg_dir, ignore_errors=True)
-            else:
-                # Keep pyside6/ — only delete user data files/folders.
-                for _item in list(_cfg_dir.iterdir()):
-                    if _item.name == "pyside6":
-                        continue
-                    try:
-                        if _item.is_dir():
-                            shutil.rmtree(_item, ignore_errors=True)
-                        else:
-                            _item.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+            _skip = set() if remove_pyside6 else {"pyside6"}
+            # Best-effort synchronous pass first — this removes everything
+            # that ISN'T currently locked, which is most of it.  Failures are
+            # logged rather than silently swallowed, so a partial wipe is at
+            # least visible instead of looking identical to a full one.
+            for _item in list(_cfg_dir.iterdir()):
+                if _item.name in _skip:
+                    continue
+                try:
+                    if _item.is_dir():
+                        shutil.rmtree(_item)
+                    else:
+                        _item.unlink(missing_ok=True)
+                except Exception as exc:
+                    print(f"[wipe] could not remove {_item}: {exc!r}", flush=True)
+
+            if remove_pyside6 and _cfg_dir.exists():
+                # Whatever's left (in practice, always pyside6/) is still
+                # locked — those are the exact DLLs this process is running
+                # its own UI on right now.  Windows won't release the lock
+                # until every process holding it exits, so finishing this
+                # synchronously is impossible.  Hand it to a detached helper
+                # that waits for that before deleting the rest.
+                print(
+                    "[wipe] pyside6/ is in use by this process — "
+                    "scheduling deferred delete after exit", flush=True,
+                )
+                _schedule_deferred_delete(_cfg_dir, os.getpid())
 
         # When PySide6 is being removed, also clear the bootstrap config so
         # the next launch re-runs the setup wizard rather than trying to load
