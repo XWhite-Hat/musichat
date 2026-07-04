@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -96,6 +97,53 @@ def run() -> None:
     os.environ["MUSICHAT_DATA_DIR"] = data_dir
     _ensure_env_file(Path(data_dir))
     _add_pyside6_to_path(Path(data_dir))
+
+    # The checks above only prove the expected files exist — never that they
+    # actually load.  A stale install left by a different/older MusicHat
+    # version, an interrupted "remove & exit" (deferred deletion didn't
+    # finish before this launch), antivirus quarantine, or disk corruption
+    # can all pass every structural check above and still fail here.  Catch
+    # it now, before main.py or anything else starts up, so a broken install
+    # gets the same clear recovery dialog every other case does — instead of
+    # an opaque crash deep inside the app that nobody can diagnose.
+    #
+    # Retried a few times before giving up: freshly-downloaded, unsigned
+    # DLLs are exactly what Windows Defender's real-time on-access scanner
+    # inspects on first LoadLibrary call, which can transiently surface as
+    # "DLL load failed / module not found" on the very first launch after
+    # install and then never again once the scan completes.  Confirmed on
+    # this machine — a failing install re-imported seconds later, completely
+    # unmodified, succeeded.  A short retry loop absorbs that race instead
+    # of sending users into an unnecessary repair/re-download.
+    #
+    # If every attempt fails, sys.modules will have cached whatever
+    # partially imported before the last exception, so retrying the *same*
+    # import in this process after a repair would just return the stale
+    # cached module rather than the freshly-repaired files.  Recovery
+    # instead asks for a restart, which starts clean.
+    _last_exc: Optional[BaseException] = None
+    for _attempt in range(1, 4):
+        try:
+            import shiboken6            # noqa: F401
+            from PySide6 import QtCore  # noqa: F401
+            _last_exc = None
+            break
+        except Exception as exc:
+            _last_exc = exc
+            print(
+                f"[bootstrap] PySide6 import smoke-test attempt {_attempt}/3 "
+                f"failed: {exc!r}",
+                flush=True,
+            )
+            if _attempt < 3:
+                time.sleep(1.5)
+
+    if _last_exc is not None:
+        if _run_recovery(data_dir, cfg_path, reason="import_failed"):
+            _show_restart_notice()
+        else:
+            _show_abort_notice()
+        sys.exit(1)
 
 
 # ── Internal ───────────────────────────────────────────────────────────────────
@@ -175,7 +223,41 @@ def _add_pyside6_to_path(data_dir: Path) -> None:
                 except (AttributeError, OSError):
                     pass
 
+        # os.add_dll_directory() alone is not enough — confirmed by building
+        # both the console and windowed (console=False) variants from
+        # identical source: the console build imports PySide6 fine, the
+        # windowed one fails with "DLL load failed while importing Shiboken:
+        # The specified module could not be found" every time, even against
+        # a brand-new install.  PyInstaller's windowed bootloader does not
+        # reliably honour the safe-DLL-search-mode directories added via
+        # os.add_dll_directory() the way the console bootloader does.
+        #
+        # Explicitly loading the native DLLs here sidesteps that entirely:
+        # once a DLL of a given name is already resident in the process,
+        # Windows reuses it to satisfy any later dependency lookup by that
+        # name, regardless of what search path the bootloader set up.
+        _preload_native_dlls(shiboken6_pkg)
+        _preload_native_dlls(pyside6_pkg)
+
     _ensure_shiboken6_init(shiboken6_pkg)
+
+
+def _preload_native_dlls(pkg_dir: Path) -> None:
+    """Load every .dll directly inside *pkg_dir* into the process.
+
+    Each file is loaded via its full path, so Windows resolves its own
+    transitive dependencies against its containing directory regardless of
+    the process-wide DLL search path — the same guarantee os.add_dll_directory
+    is supposed to provide but doesn't in a windowed PyInstaller build.
+    """
+    if not pkg_dir.is_dir():
+        return
+    import ctypes
+    for dll in sorted(pkg_dir.glob("*.dll")):
+        try:
+            ctypes.WinDLL(str(dll))
+        except OSError as exc:
+            print(f"[bootstrap] could not preload {dll.name}: {exc!r}", flush=True)
 
 
 def _ensure_shiboken6_init(shiboken6_pkg: Path) -> None:
@@ -264,3 +346,24 @@ def _show_abort_notice() -> None:
         root.destroy()
     except Exception:
         print("[bootstrap] MusicHat cannot start: PySide6 not found.", flush=True)
+
+
+def _show_restart_notice() -> None:
+    """
+    Shown after a successful PySide6 repair.  A restart is required rather
+    than continuing in this process — sys.modules would still be caching
+    whatever partially imported before the earlier failure, not the
+    freshly-repaired files on disk.
+    """
+    try:
+        import tkinter as tk
+        import tkinter.messagebox as mb
+        root = tk.Tk()
+        root.withdraw()
+        mb.showinfo(
+            "MusicHat — Repaired",
+            "PySide6 has been repaired.\n\nPlease restart MusicHat.",
+        )
+        root.destroy()
+    except Exception:
+        print("[bootstrap] PySide6 repaired — please restart MusicHat.", flush=True)

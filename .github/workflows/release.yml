@@ -206,11 +206,6 @@ jobs:
         env:
           MUSICHAT_VERSION: ${{ needs.validate-tag.outputs.version }}
 
-      # ── Rename artifact ────────────────────────────────────────────────────
-      - name: Rename artifact
-        shell: bash
-        run: mv dist/musichat.exe dist/musichat-windows.exe
-
       # ── Install cosign ─────────────────────────────────────────────────────
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
@@ -226,8 +221,8 @@ jobs:
         run: |
           cosign sign-blob \
             --yes \
-            --bundle "dist/musichat-windows.exe.bundle" \
-            "dist/musichat-windows.exe"
+            --bundle "dist/musichat.exe.bundle" \
+            "dist/musichat.exe"
 
       # ── Generate SBOM ──────────────────────────────────────────────────────
       - name: Install syft
@@ -240,7 +235,7 @@ jobs:
           MUSICHAT_VERSION: ${{ needs.validate-tag.outputs.version }}
         run: |
           syft . \
-            --output spdx-json=dist/musichat-windows.exe.spdx.json \
+            --output spdx-json=dist/musichat.exe.spdx.json \
             --source-name musichat \
             --source-version "$MUSICHAT_VERSION"
 
@@ -250,9 +245,9 @@ jobs:
         with:
           name: windows-artifacts
           path: |
-            dist/musichat-windows.exe
-            dist/musichat-windows.exe.bundle
-            dist/musichat-windows.exe.spdx.json
+            dist/musichat.exe
+            dist/musichat.exe.bundle
+            dist/musichat.exe.spdx.json
           retention-days: 7
           if-no-files-found: error
 
@@ -311,8 +306,8 @@ jobs:
               --certificate-identity \
                 "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              --bundle musichat-windows.exe.bundle \
-              musichat-windows.exe
+              --bundle musichat.exe.bundle \
+              musichat.exe
             ```
 
             SHA-256 checksum is in `SHA256SUMS.txt`.

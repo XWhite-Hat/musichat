@@ -11,16 +11,17 @@ Public surface:
       Returns the chosen data_dir path on success, None on cancel/failure.
 
   run_recovery_dialog(data_dir, reason) -> str | None
-      Recovery for "data_dir found but PySide6 missing or incomplete".
-      reason is "missing" or "incomplete".  Returns data_dir to proceed
-      (repaired/re-downloaded), a new path if the user chose to change
-      folder, or None to abort.
+      Recovery for "data_dir found but PySide6 missing, incomplete, or
+      failing to import".  reason is "missing", "incomplete", or
+      "import_failed".  Returns data_dir to proceed (repaired/re-downloaded),
+      a new path if the user chose to change folder, or None to abort.
 """
 from __future__ import annotations
 
 import os
 import shutil
 import threading
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog
 from typing import Optional
@@ -35,6 +36,8 @@ ctk.set_default_color_theme("green")
 _W, _H       = 540, 420
 _W_RECOVERY          = 480, 260
 _W_RECOVERY_REPAIR   = 480, 310
+_W_RECOVERY_IMPORT_FAILED = 520, 400
+_VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 _FONT_TITLE  = ("Segoe UI", 18, "bold")
 _FONT_BODY   = ("Segoe UI", 12)
 _FONT_HINT   = ("Segoe UI", 10)
@@ -417,8 +420,10 @@ class _RecoveryDialog(ctk.CTk):
     or the install is incomplete.
 
     reason:
-      "missing"    — the PySide6 directories do not exist at all
-      "incomplete" — directories exist but the install is broken/partial
+      "missing"       — the PySide6 directories do not exist at all
+      "incomplete"    — directories exist but the install is broken/partial
+      "import_failed" — directories + sentinel look complete but importing
+                         PySide6 raised an exception anyway
 
     .result:
       "download"       — user chose to download / repair
@@ -430,7 +435,12 @@ class _RecoveryDialog(ctk.CTk):
     def __init__(self, data_dir: str, reason: str = "missing") -> None:
         super().__init__()
         self.resizable(False, False)
-        win_size = _W_RECOVERY_REPAIR if reason == "incomplete" else _W_RECOVERY
+        if reason == "import_failed":
+            win_size = _W_RECOVERY_IMPORT_FAILED
+        elif reason == "incomplete":
+            win_size = _W_RECOVERY_REPAIR
+        else:
+            win_size = _W_RECOVERY
         _center(self, *win_size)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -440,7 +450,21 @@ class _RecoveryDialog(ctk.CTk):
 
         pad = dict(padx=28, pady=14)
 
-        if reason == "incomplete":
+        if reason == "import_failed":
+            self.title("MusicHat — PySide6 Failed to Load")
+            heading    = "PySide6 failed to load"
+            body       = (
+                f"MusicHat found your data folder:\n  {data_dir}\n\n"
+                "PySide6 looks installed there, but it failed to load.\n"
+                "This is usually caused by a leftover install from a\n"
+                "different MusicHat version, an interrupted removal, or a\n"
+                "corrupted download.\n\n"
+                "Less commonly, it can mean the Microsoft Visual C++\n"
+                "Redistributable is missing from this PC.\n\n"
+                "Re-downloading a clean copy of PySide6 fixes most cases."
+            )
+            action_btn = "Repair now"
+        elif reason == "incomplete":
             self.title("MusicHat — PySide6 Incomplete Installation")
             heading    = "PySide6 installation incomplete"
             body       = (
@@ -467,7 +491,7 @@ class _RecoveryDialog(ctk.CTk):
                      justify="left").pack(anchor="w", padx=28, pady=(0, 14))
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=28, pady=(0, 20))
+        btn_frame.pack(fill="x", padx=28, pady=(0, 8))
         ctk.CTkButton(btn_frame, text=action_btn,
                       command=self._download).pack(side="left", padx=(0, 8))
         ctk.CTkButton(btn_frame, text="I'll install it myself", fg_color="transparent",
@@ -476,6 +500,13 @@ class _RecoveryDialog(ctk.CTk):
         ctk.CTkButton(btn_frame, text="Change folder", fg_color="transparent",
                       border_width=1,
                       command=self._change).pack(side="left")
+
+        if reason == "import_failed":
+            ctk.CTkButton(
+                self, text="Get Microsoft Visual C++ Redistributable",
+                fg_color="transparent", border_width=1,
+                command=lambda: webbrowser.open(_VC_REDIST_URL),
+            ).pack(anchor="w", padx=28, pady=(0, 20))
 
     def _download(self) -> None:
         self.result = "download"
@@ -612,8 +643,9 @@ def run_recovery_dialog(data_dir: str, reason: str = "missing") -> Optional[str]
     Handle "data_dir found but PySide6 missing or incomplete".
 
     reason:
-      "missing"    — PySide6 directories are absent
-      "incomplete" — directories exist but install is damaged/partial
+      "missing"       — PySide6 directories are absent
+      "incomplete"    — directories exist but install is damaged/partial
+      "import_failed" — install looks complete but failed to import
 
     Returns:
       str  — the resolved data_dir if PySide6 is now in place
@@ -638,7 +670,7 @@ def run_recovery_dialog(data_dir: str, reason: str = "missing") -> Optional[str]
             return result  # None if they cancelled again
 
         if action == "download":
-            mode = "repair" if reason == "incomplete" else "download"
+            mode = "repair" if reason in ("incomplete", "import_failed") else "download"
             dl = _DownloadOnlyDialog(data_dir, mode=mode)
             result = dl.run()
             if result:
