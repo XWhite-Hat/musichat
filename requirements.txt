@@ -1,11 +1,11 @@
 PySide6>=6.11.1
 customtkinter>=5.2.0
 sounddevice>=0.5.5
-numpy>=2.5.1
+numpy>=2.5.2
 twitchio>=3.3.2,<4.0.0
 requests>=2.34.2
 fastapi>=0.141.1
-uvicorn[standard]>=0.52.1
+uvicorn[standard]>=0.52.3
 PyJWT>=2.13.0
 cryptography>=42.0.0
 keyring>=25.7.0
