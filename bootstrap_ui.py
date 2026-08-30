@@ -24,7 +24,6 @@ import threading
 import webbrowser
 from pathlib import Path
 from tkinter import filedialog
-from typing import Optional
 
 import customtkinter as ctk
 
@@ -118,7 +117,7 @@ class _SetupWizard(ctk.CTk):
         _center(self, _W, _H)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.result: Optional[str] = None
+        self.result: str | None = None
         self._chosen_dir = default_dir
         self._cancel_download = threading.Event()
 
@@ -338,13 +337,12 @@ class _SetupWizard(ctk.CTk):
         if not already_confirmed:
             exists = result_path.exists()
             has_children = exists and any(result_path.iterdir())
-            if exists or has_children:
-                if not self._confirm_wipe(
-                    "Folder Already Exists",
-                    f"The selected folder already exists:\n  {resulting_dir}\n\n"
-                    "Continuing will delete everything inside it to ensure a clean install.",
-                ):
-                    return
+            if (exists or has_children) and not self._confirm_wipe(
+                "Folder Already Exists",
+                f"The selected folder already exists:\n  {resulting_dir}\n\n"
+                "Continuing will delete everything inside it to ensure a clean install.",
+            ):
+                return
 
         # Confirmed (or nothing to confirm) — wipe if present, then start clean.
         if result_path.exists():
@@ -444,11 +442,11 @@ class _RecoveryDialog(ctk.CTk):
         _center(self, *win_size)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
-        self.result: Optional[str] = None
+        self.result: str | None = None
         self._data_dir = data_dir
         self._reason   = reason
 
-        pad = dict(padx=28, pady=14)
+        pad = {"padx": 28, "pady": 14}
 
         if reason == "import_failed":
             self.title("MusicHat — PySide6 Failed to Load")
@@ -538,7 +536,7 @@ class _ManualInstallNotice(ctk.CTk):
         _center(self, 500, 260)
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
-        pad = dict(padx=28, pady=12)
+        pad = {"padx": 28, "pady": 12}
         ctk.CTkLabel(self, text="Manual PySide6 installation",
                      font=_FONT_TITLE).pack(anchor="w", **pad)
         ctk.CTkLabel(
@@ -575,11 +573,11 @@ class _DownloadOnlyDialog(ctk.CTk):
         _center(self, _W, 280)
         self.protocol("WM_DELETE_WINDOW", lambda: None)  # no close during DL
 
-        self.result: Optional[str] = None
+        self.result: str | None = None
         self._data_dir = data_dir
         self._cancel_ev = threading.Event()
 
-        pad = dict(padx=32, pady=10)
+        pad = {"padx": 32, "pady": 10}
 
         ctk.CTkLabel(self, text=f"{verb} PySide6…",
                      font=_FONT_TITLE).pack(anchor="w", padx=32, pady=(24, 10))
@@ -621,14 +619,14 @@ class _DownloadOnlyDialog(ctk.CTk):
             self.after(0, self._error_lbl.configure, {"text": f"Failed: {msg}"})
             self.after(0, self._status_var.set, "Download failed.")
 
-    def run(self) -> Optional[str]:
+    def run(self) -> str | None:
         self.mainloop()
         return self.result
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def run_setup_wizard(default_dir: str) -> Optional[str]:
+def run_setup_wizard(default_dir: str) -> str | None:
     """
     Show the full first-run wizard.  Returns the chosen data_dir on success
     (PySide6 downloaded and verified), None if the user cancelled.
@@ -638,7 +636,7 @@ def run_setup_wizard(default_dir: str) -> Optional[str]:
     return wizard.result
 
 
-def run_recovery_dialog(data_dir: str, reason: str = "missing") -> Optional[str]:
+def run_recovery_dialog(data_dir: str, reason: str = "missing") -> str | None:
     """
     Handle "data_dir found but PySide6 missing or incomplete".
 

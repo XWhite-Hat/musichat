@@ -16,7 +16,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Callable, Optional
+from collections.abc import Callable
 
 
 # Splits a title on its first "Artist - Song" separator.
@@ -222,23 +222,23 @@ class QueueManager:
         self._lock = threading.Lock()
         self._queue: list[Track] = []
         self._history: list[Track] = []
-        self._current: Optional[Track] = None
+        self._current: Track | None = None
 
         # Callbacks — multiple listeners supported via list
         self.on_queue_changed: list[Callable[[], None]] = []
-        self.on_track_started: Optional[Callable[[Track], None]] = None
-        self.on_track_finished: Optional[Callable[[Track], None]] = None
-        self.on_empty: Optional[Callable[[], None]] = None
+        self.on_track_started: Callable[[Track], None] | None = None
+        self.on_track_finished: Callable[[Track], None] | None = None
+        self.on_empty: Callable[[], None] | None = None
 
-        # Per-user request tracking — current queue count (for queue_limit cap)
-        self._user_request_counts: dict[str, int] = {}
+        # Per-user queue counts are derived from the live queue on demand
+        # (see user_request_count) — there is deliberately no counter here.
         # Per-stream session counter — total requests made this session (for max_per_stream cap)
         self._session_requests: dict[str, int] = {}
 
     # ── Read accessors ─────────────────────────────────────────────────────────
 
     @property
-    def current(self) -> Optional[Track]:
+    def current(self) -> Track | None:
         return self._current
 
     def snapshot(self) -> list[Track]:
@@ -263,7 +263,7 @@ class QueueManager:
 
     # ── Mutations ──────────────────────────────────────────────────────────────
 
-    def enqueue(self, track: Track, position: Optional[int] = None) -> int:
+    def enqueue(self, track: Track, position: int | None = None) -> int:
         """Append or insert. Returns 1-based queue position."""
         with self._lock:
             if position is not None:
@@ -278,17 +278,36 @@ class QueueManager:
         self._notify_changed()
         return pos
 
-    def enqueue_request(self, track: Track) -> int:
+    def enqueue_request(self, track: Track, max_for_user: int = 0) -> int:
         """Insert a user-requested track before any auto-suggestion entries.
 
         Auto-suggestions sit at the tail of the queue; human requests should
         always jump ahead of them so chat/channel-point requests feel instant
         rather than landing after a dozen vibe-engine suggestions.
 
+        max_for_user caps how many tracks this requester may have queued at
+        once (0 = unlimited).  The cap is enforced here, under the same lock
+        that performs the insert, because the caller's earlier check happens
+        seconds beforehand — a chat command checks the cap, then spends a
+        network round-trip resolving the track before reaching this point, so
+        two quick requests could both pass a check made outside this lock.
+
         Returns the 1-based position among *non-auto* tracks (used for chat
-        confirmation messages).
+        confirmation messages), or -1 if the per-user cap would be exceeded.
         """
         with self._lock:
+            # Count inline rather than calling user_request_count(): the lock
+            # is not reentrant, so calling a method that re-acquires it here
+            # would deadlock (see the note in remove_last_by_user).
+            if max_for_user > 0 and track.requested_by:
+                key = track.requested_by.lower()
+                queued = sum(
+                    1 for t in self._queue
+                    if (t.requested_by or "").lower() == key
+                )
+                if queued >= max_for_user:
+                    return -1
+
             # Find the index of the first auto-suggestion
             insert_at = len(self._queue)  # default: append
             for i, t in enumerate(self._queue):
@@ -324,9 +343,9 @@ class QueueManager:
             self._notify_changed()
         return removed
 
-    def remove_last_by_user(self, username: str) -> Optional[Track]:
+    def remove_last_by_user(self, username: str) -> Track | None:
         """!wrongsong — remove the most recently queued track by this user."""
-        removed: Optional[Track] = None
+        removed: Track | None = None
         # Comparison is case-insensitive — twitchio lowercases names but be safe.
         key = username.lower()
         with self._lock:
@@ -354,7 +373,7 @@ class QueueManager:
             self._notify_changed()
         return moved
 
-    def pop_next(self) -> Optional[Track]:
+    def pop_next(self) -> Track | None:
         """Called by the engine when it's ready for the next track."""
         with self._lock:
             if not self._queue:
@@ -386,10 +405,10 @@ class QueueManager:
             self._queue.extend(preserved)
         self._notify_changed()
 
-    def skip(self) -> Optional[Track]:
+    def skip(self) -> Track | None:
         return self.pop_next()
 
-    def set_current(self, track: Optional[Track]) -> None:
+    def set_current(self, track: Track | None) -> None:
         """Update the current-track pointer without popping from the queue.
 
         Called by the engine when a track is started directly (not via pop_next),
@@ -408,15 +427,26 @@ class QueueManager:
     # ── Per-user caps ──────────────────────────────────────────────────────────
 
     def user_request_count(self, username: str) -> int:
-        return self._user_request_counts.get(username, 0)
+        """
+        How many of *username*'s tracks are in the queue right now.
 
-    def increment_user_count(self, username: str) -> None:
-        self._user_request_counts[username] = (
-            self._user_request_counts.get(username, 0) + 1
-        )
+        Derived from the live queue rather than tracked in a counter.  The cap
+        this feeds means "songs queued at once", so it has to fall as the
+        user's tracks play out — a monotonic counter could never express that,
+        and the one that used to live here was in fact never incremented by
+        anything, which silently disabled the queue_limit cap entirely.
 
-    def reset_user_counts(self) -> None:
-        self._user_request_counts.clear()
+        The currently-playing track is deliberately excluded: it has left the
+        queue, so it should no longer count against the user's allowance.
+        """
+        key = (username or "").lower()
+        if not key:
+            return 0
+        with self._lock:
+            return sum(
+                1 for t in self._queue
+                if (t.requested_by or "").lower() == key
+            )
 
     # ── Per-stream session caps ────────────────────────────────────────────────
 
@@ -442,7 +472,7 @@ class QueueManager:
         }
 
     @staticmethod
-    def _track_dict(t: Optional[Track]) -> Optional[dict]:
+    def _track_dict(t: Track | None) -> dict | None:
         if t is None:
             return None
         return {

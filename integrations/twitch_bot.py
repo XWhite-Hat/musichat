@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from config import TwitchConfig
 from player.queue_manager import QueueManager
@@ -46,50 +46,52 @@ class TwitchBot:
         self.queue = queue
 
         # Callbacks — set by whoever needs to react (UI, resolver)
-        self.on_song_request: Optional[Callable[[str, str], None]] = None
-        self.on_chat_message: Optional[Callable[[str, str], None]] = None
-        self.on_connecting: Optional[Callable[[str], None]] = None
-        self.on_connected: Optional[Callable[[], None]] = None
-        self.on_disconnected: Optional[Callable[[], None]] = None
+        # (query, username, queue_limit) — queue_limit is enforced atomically at
+        # enqueue time; 0 means unlimited.
+        self.on_song_request: Callable[[str, str, int], None] | None = None
+        self.on_chat_message: Callable[[str, str], None] | None = None
+        self.on_connecting: Callable[[str], None] | None = None
+        self.on_connected: Callable[[], None] | None = None
+        self.on_disconnected: Callable[[], None] | None = None
         # Called when a token refresh succeeds so the caller can persist the
         # updated tokens.  Signature: (account: str, access_token: str, refresh_token: str)
-        self.on_token_refreshed: Optional[Callable[[str, str, str], None]] = None
+        self.on_token_refreshed: Callable[[str, str, str], None] | None = None
 
         # Channel-points callback — (query, username, redemption_id, reward_id).
-        self.on_channel_points_request: Optional[Callable[[str, str, str, str], None]] = None
+        self.on_channel_points_request: Callable[[str, str, str, str], None] | None = None
 
         # Called after the bot modifies cfg (e.g. reward deleted → cleared).
-        self.on_config_changed: Optional[Callable[[], None]] = None
+        self.on_config_changed: Callable[[], None] | None = None
 
         # Called by !wrongsong when no queued track is found for the user.
         # Signature: (username: str) -> Optional[Track]
-        self.on_cancel_current_song: Optional[Callable[[str], Optional[object]]] = None
+        self.on_cancel_current_song: Callable[[str], object | None] | None = None
 
         # Called when the stored CP reward was not found on startup.
-        self.on_cp_reward_deleted: Optional[Callable[[], None]] = None
+        self.on_cp_reward_deleted: Callable[[], None] | None = None
 
         # Called when a token refresh returns reauth_required from the Worker,
         # meaning the token was revoked or replaced on another device.
         # Signature: (account: str, message: str)
-        self.on_reauth_required: Optional[Callable[[str, str], None]] = None
+        self.on_reauth_required: Callable[[str, str], None] | None = None
 
         # Called when startup auth fails definitively (token invalid after retry).
         # Signature: (account: str)  — "bot" | "streamer"
-        self.on_auth_failed: Optional[Callable[[str], None]] = None
+        self.on_auth_failed: Callable[[str], None] | None = None
 
         # Called when stream.offline fires — refund all queued CP redemptions.
-        self.on_stream_offline: Optional[Callable[[], None]] = None
+        self.on_stream_offline: Callable[[], None] | None = None
 
         # Called after tokens are confirmed fresh (refreshed or still valid),
         # before the bot connects.  Use this to sync DPoP keys or do any
         # pre-connect setup that requires a valid access token.
-        self.on_tokens_ready: Optional[Callable[[], None]] = None
+        self.on_tokens_ready: Callable[[], None] | None = None
 
         # Cooldown tracking: username → last request timestamp
         self._cooldowns: dict[str, float] = {}
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._thread: Optional[threading.Thread] = None
-        self._bot: Optional[object] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._bot: object | None = None
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -142,7 +144,7 @@ class TwitchBot:
 
             # 5: Connect to Twitch chat.  Attempt at most twice: on an auth
             #    rejection force a token re-exchange and retry once.
-            _auth_failed_account: Optional[str] = None
+            _auth_failed_account: str | None = None
             for _attempt in range(2):
                 if _attempt > 0:
                     # Auth was rejected — zero the timestamps so
@@ -230,7 +232,9 @@ class TwitchBot:
         if self.on_channel_points_request:
             self.on_channel_points_request(user_input, user_login, redemption_id, reward_id)
         elif self.on_song_request:
-            self.on_song_request(user_input, user_login)
+            # Channel-point redemptions are paid for, so they are not
+            # subject to the per-tier queue cap.
+            self.on_song_request(user_input, user_login, 0)
 
     def mark_track_started(self, track) -> None:
         """FULFILL the CP redemption after the song actually starts playing."""
@@ -568,6 +572,18 @@ class TwitchBot:
         """Tell chat that a request couldn't be resolved.  Thread-safe."""
         self._post(f"@{username} couldn't find anything for: {query!r}")
 
+    def announce_limit_reached(self, username: str) -> None:
+        """
+        Tell chat the request was dropped at enqueue time for exceeding the
+        user's queue cap.  Distinct from the pre-resolve check in
+        cmd_songrequest: this fires when a second request slipped past that
+        check while the first was still being resolved.  Thread-safe.
+        """
+        self._post(
+            f"@{username} you've reached your queue limit — "
+            "wait for one of your songs to play"
+        )
+
     def _post(self, message: str) -> None:
         """Send a chat message from any thread."""
         if not (self._bot and self._loop and not self._loop.is_closed()):
@@ -608,9 +624,7 @@ class TwitchBot:
             return True
         if perm in ("mod", "vip") and getattr(chatter, "vip", False):
             return True
-        if perm in ("mod", "vip", "subscriber") and chatter.subscriber:
-            return True
-        return False
+        return bool(perm in ("mod", "vip", "subscriber") and chatter.subscriber)
 
 
 if HAS_TWITCHIO:
@@ -656,7 +670,7 @@ if HAS_TWITCHIO:
                 await ctx.send(f"@{username} you've reached your per-stream request limit")
                 return
             if self.ctrl.on_song_request:
-                self.ctrl.on_song_request(query, username)
+                self.ctrl.on_song_request(query, username, tier.queue_limit)
             else:
                 await ctx.send(f"@{username} song resolver not ready — try again shortly")
 

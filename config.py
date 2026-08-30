@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, field, asdict
-from typing import Optional
 
 from data_dir import DATA_DIR as _DATA_DIR
 CONFIG_PATH = os.path.join(_DATA_DIR, "config.json")
@@ -203,7 +203,7 @@ class ServerConfig:
 
 @dataclass
 class AudioConfig:
-    output_device: Optional[int] = None   # None = system default
+    output_device: int | None = None   # None = system default
     sample_rate: int = 48000
     channels: int = 2
     blocksize: int = 1024
@@ -272,7 +272,7 @@ class AppConfig:
         """Return the active preset.  Never returns None — falls back to first."""
         return self.get_preset(self.active_preset_name) or self.spectrogram_presets[0]
 
-    def get_preset(self, name: str) -> Optional[SpectrogramConfig]:
+    def get_preset(self, name: str) -> SpectrogramConfig | None:
         for p in self.spectrogram_presets:
             if p.name == name:
                 return p
@@ -297,26 +297,14 @@ class AppConfig:
 
 def _dict_to_dataclass(cls, d: dict):
     """Recursively hydrate nested dataclasses from a dict."""
-    if not isinstance(d, dict):
-        return d
-    hints = {f.name: f for f in cls.__dataclass_fields__.values()}
-    kwargs = {}
-    for key, val in d.items():
-        if key not in hints:
-            continue
-        field_type = hints[key].type
-        # Resolve string annotations
-        if isinstance(field_type, str):
-            import sys
-            field_type = eval(field_type, sys.modules[cls.__module__].__dict__)
-        if hasattr(field_type, "__dataclass_fields__") and isinstance(val, dict):
-            kwargs[key] = _dict_to_dataclass(field_type, val)
-        else:
-            kwargs[key] = val
-    return cls(**kwargs)
+    # Implementation lives in dataclass_utils so config.py and
+    # server/settings_app.py cannot drift apart (they previously had separate
+    # copies, each resolving annotations with a bare eval()).
+    from dataclass_utils import dict_to_dataclass
+    return dict_to_dataclass(cls, d)
 
 
-def _resolve_secrets(cfg: "AppConfig") -> None:
+def _resolve_secrets(cfg: AppConfig) -> None:
     """Replace sentinel values with the real secrets from the OS credential store."""
     import secure_store as _ss
     cfg.twitch.streamer_token         = _ss.resolve(cfg.twitch.streamer_token,         _ss.STREAMER_TOKEN)
@@ -326,7 +314,7 @@ def _resolve_secrets(cfg: "AppConfig") -> None:
     cfg.server.jwt_secret             = _ss.resolve(cfg.server.jwt_secret,             _ss.JWT_SECRET)
 
 
-def _store_secrets(cfg: "AppConfig") -> None:
+def _store_secrets(cfg: AppConfig) -> None:
     """Move plain-text secrets to the OS credential store and replace with sentinels."""
     import secure_store as _ss
     cfg.twitch.streamer_token         = _ss.store(_ss.STREAMER_TOKEN,  cfg.twitch.streamer_token)
@@ -343,7 +331,7 @@ def load_config() -> AppConfig:
         save_config(cfg)
         return cfg
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+        with _config_lock, open(CONFIG_PATH, encoding="utf-8") as fh:
             raw = json.load(fh)
 
         # ── Migrate old flat Twitch request rules → per-tier ─────────────────
@@ -386,21 +374,67 @@ def load_config() -> AppConfig:
 
         _resolve_secrets(cfg)
         return cfg
-    except Exception:
+    except Exception as exc:
+        # Falling back to defaults silently discards every setting the user
+        # has — tiers, spectrogram presets, overlay layout — with no way to
+        # tell that it happened or to get any of it back.  Keep the bad file
+        # so it can be inspected or salvaged, and say so loudly.
+        backup = CONFIG_PATH + ".corrupt"
+        try:
+            with _config_lock:
+                os.replace(CONFIG_PATH, backup)
+            print(
+                f"[config] {CONFIG_PATH} could not be read ({exc!r}).\n"
+                f"[config] It has been preserved as {backup} and defaults "
+                f"loaded in its place."
+            )
+        except Exception as move_exc:
+            print(
+                f"[config] {CONFIG_PATH} could not be read ({exc!r}) and could "
+                f"not be preserved ({move_exc!r}). Defaults loaded."
+            )
         return AppConfig()
+
+
+# Config file access is reachable from the Qt main thread, the settings
+# server thread and the Twitch bot thread (on_config_changed calls it
+# directly), so it must be serialised.
+#
+# Readers are guarded as well as writers, and that is a Windows requirement
+# rather than caution: os.replace() cannot rename over a file that another
+# thread currently has open, and fails with PermissionError if it tries.  A
+# concurrent load_config() during a save would therefore break the save.
+#
+# RLock rather than Lock because load_config() calls save_config() on the
+# same thread when no config file exists yet.
+_config_lock = threading.RLock()
 
 
 def save_config(cfg: AppConfig) -> None:
     import copy
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    # Work on a shallow copy so we don't mutate live cfg with sentinels.
-    cfg_copy = copy.deepcopy(cfg)
-    _store_secrets(cfg_copy)
-    # After _store_secrets, the original cfg still has real values in memory;
-    # cfg_copy has sentinels (or plain values on keyring fallback).
-    # Resolve sentinels back into cfg so in-memory state stays correct.
-    _resolve_secrets(cfg)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+    with _config_lock:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        # Work on a shallow copy so we don't mutate live cfg with sentinels.
+        cfg_copy = copy.deepcopy(cfg)
+        _store_secrets(cfg_copy)
+        # After _store_secrets, the original cfg still has real values in memory;
+        # cfg_copy has sentinels (or plain values on keyring fallback).
+        # Resolve sentinels back into cfg so in-memory state stays correct.
+        _resolve_secrets(cfg)
+
+        # Write to a temporary file and rename over the target.  Writing
+        # CONFIG_PATH directly truncates it before the new content lands, so a
+        # crash, force-quit or power loss at that moment leaves an empty or
+        # half-written config — which load_config() then discards, silently
+        # resetting every setting the user has.  os.replace() is atomic on both
+        # Win32 and POSIX, so the file on disk is only ever the old config or
+        # the complete new one.
+        tmp_path = CONFIG_PATH + ".tmp"
         # asdict() recurses into SpectrogramConfig objects inside the list.
         # The `spectrogram` @property is not a dataclass field → not serialised.
-        json.dump(asdict(cfg_copy), fh, indent=2)
+        payload = json.dumps(asdict(cfg_copy), indent=2)
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())   # content must hit disk before the rename
+        os.replace(tmp_path, CONFIG_PATH)

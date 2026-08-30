@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 
@@ -59,7 +59,7 @@ class FFTPipeline:
 
         self._frame_listeners: list[Callable[[np.ndarray], None]] = []
 
-        self._pcm_queue: queue.Queue[Optional[np.ndarray]] = queue.Queue(maxsize=32)
+        self._pcm_queue: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=32)
         self._accum = np.zeros(fft_size, dtype=np.float32)
         self._accum_pos = 0
         self._smoothed = np.zeros(bar_count, dtype=np.float32)
@@ -81,12 +81,12 @@ class FFTPipeline:
     def reconfigure(
         self,
         *,
-        bar_count: Optional[int] = None,
-        freq_min: Optional[int] = None,
-        freq_max: Optional[int] = None,
-        window_function: Optional[str] = None,
-        smoothing: Optional[float] = None,
-        fft_size: Optional[int] = None,
+        bar_count: int | None = None,
+        freq_min: int | None = None,
+        freq_max: int | None = None,
+        window_function: str | None = None,
+        smoothing: float | None = None,
+        fft_size: int | None = None,
     ) -> None:
         if bar_count is not None:
             self.bar_count = bar_count
@@ -139,10 +139,7 @@ class FFTPipeline:
                 return
 
             # Convert stereo → mono
-            if pcm.ndim == 2:
-                mono = pcm.mean(axis=1).astype(np.float32)
-            else:
-                mono = pcm.astype(np.float32)
+            mono = pcm.mean(axis=1).astype(np.float32) if pcm.ndim == 2 else pcm.astype(np.float32)
 
             # Fill accumulator
             pos = 0

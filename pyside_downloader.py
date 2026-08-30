@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ ProgressCb = Callable[[int, int, str], None]  # (bytes_done, bytes_total, status
 
 def download_pyside6(
     target_dir: Path,
-    progress_cb: Optional[ProgressCb] = None,
+    progress_cb: ProgressCb | None = None,
 ) -> tuple[bool, str]:
     """
     Find the latest safe PySide6 version, download all three packages,
@@ -116,8 +116,8 @@ def download_pyside6(
 # ── Internal ───────────────────────────────────────────────────────────────────
 
 def _find_safe_version(
-    progress_cb: Optional[ProgressCb],
-) -> tuple[Optional[str], str]:
+    progress_cb: ProgressCb | None,
+) -> tuple[str | None, str]:
     """
     Return the newest PySide6 version whose Socket.dev score is acceptable.
     Falls back to the absolute latest if Socket is unreachable for all checked
@@ -230,7 +230,7 @@ def _socket_check(name: str, version: str) -> tuple[bool, str]:
 
 def _get_wheel_info(
     pkg_name: str, version: str
-) -> tuple[Optional[str], Optional[str], str]:
+) -> tuple[str | None, str | None, str]:
     """Return (wheel_url, sha256, error) for the best matching wheel."""
     try:
         req = urllib.request.Request(
@@ -288,7 +288,7 @@ def _get_wheel_info(
 def _download_file(
     url: str,
     dest: Path,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> tuple[bool, str]:
     try:
         req = urllib.request.Request(
@@ -326,11 +326,12 @@ def _extract_wheel(wheel_path: Path, target_dir: Path) -> None:
 
 
 def _version_tuple(v: str) -> tuple:
-    """Convert a version string to a sortable tuple, ignoring pre-release suffixes."""
-    parts = []
-    for seg in v.split(".")[:4]:
-        try:
-            parts.append(int(seg))
-        except ValueError:
-            parts.append(0)
-    return tuple(parts)
+    """Sortable version tuple.  Shared implementation — see version_utils.
+
+    Matters here because releases are ranked newest-first to pick which one to
+    download: the previous local implementation coerced any non-numeric segment
+    to 0, so a pre-release like "6.11.1rc1" collapsed to (6, 11, 0) and could
+    outrank a real 6.11.0 release.
+    """
+    from version_utils import parse_version
+    return parse_version(v, parts=4)

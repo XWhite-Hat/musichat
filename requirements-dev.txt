@@ -1,0 +1,7 @@
+# Development / CI-only dependencies.
+#
+# Deliberately NOT in requirements.txt: none of this is shipped in the binary,
+# and requirements-build.txt is hash-pinned for reproducible release builds.
+# Install with:  pip install -r requirements-dev.txt
+pytest>=8.0
+ruff==0.8.6

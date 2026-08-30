@@ -133,7 +133,7 @@ jobs:
           comment-summary-in-pr: always
 
   # ────────────────────────────────────────────────────────────────────────────
-  # 4. Static lint (ruff — fast, zero config)
+  # 4. Static lint (ruff — rules configured in ruff.toml)
   # ────────────────────────────────────────────────────────────────────────────
   lint:
     name: Lint (ruff)
@@ -199,3 +199,145 @@ jobs:
           head: HEAD
           extra_args: --only-verified
         continue-on-error: true   # advisory — trufflehog cloud is unreliable in CI
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 6. Unit tests
+  # ────────────────────────────────────────────────────────────────────────────
+  tests:
+    name: Unit tests
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # Install from the hash-pinned lockfile, exactly as the release build
+      # does, so the tests exercise the same dependency versions that ship
+      # rather than whatever happens to be latest on PyPI that day.
+      #
+      # The suite covers pure logic only (queue caps, config persistence,
+      # version comparison, logging), so it needs no display, no audio device
+      # and never imports PySide6.
+      - name: Install dependencies (hash-pinned, as release does)
+        run: pip install --require-hashes --no-deps -r requirements-build.txt
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/ -q
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 7. Build smoke test — the check that would have caught the last three
+  #    release regressions (a missing runtime dependency, an unbundled DLL,
+  #    and a crash handler that never ran).  None of the static checks above
+  #    can catch those, because none of them build or start the app.
+  # ────────────────────────────────────────────────────────────────────────────
+  build-smoke-test:
+    name: Build smoke test
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.14"
+
+      # Installs exactly what the release workflow installs, so a dependency
+      # that is missing from the lockfile fails here rather than in a release.
+      - name: Install dependencies (hash-pinned, as release does)
+        run: pip install --require-hashes --no-deps -r requirements-build.txt
+
+      - name: Install PyInstaller (hash-pinned)
+        run: |
+          pip install altgraph pyinstaller-hooks-contrib pefile pywin32-ctypes
+          pip install --require-hashes --no-deps -r build/pyinstaller-req.txt
+
+      - name: Install LGPL av wheel
+        run: pip install --force-reinstall --no-deps vendor/av-17.1.0-cp314-cp314-win_amd64.whl
+
+      - name: Build binary
+        run: pyinstaller build/musicplayer.spec --noconfirm --clean --distpath dist
+
+      # PySide6 is downloaded at first run, not bundled, so a full launch would
+      # need a ~150 MB download and a display.  Instead drive the binary's own
+      # hidden smoke-test mode, which resolves the bootstrap, loads every
+      # native DLL and imports PySide6 — the exact path that broke in v1.0.1/2.
+      - name: Verify the binary starts and can load PySide6
+        shell: pwsh
+        run: |
+          $dataDir = Join-Path $env:RUNNER_TEMP "musichat-smoke"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+
+          python -c "import sys; sys.path.insert(0,'.'); from pathlib import Path; from pyside_downloader import download_pyside6; ok,msg = download_pyside6(Path(r'$dataDir') / 'pyside6'); print('download:', ok, msg); sys.exit(0 if ok else 1)"
+
+          $p = Start-Process -FilePath "dist\musichat.exe" `
+                             -ArgumentList "--pyside6-smoke-test", $dataDir `
+                             -PassThru -Wait -NoNewWindow
+          if ($p.ExitCode -ne 0) {
+            Write-Host "::error::The built binary could not load PySide6 (exit $($p.ExitCode))."
+            Write-Host "::error::This is the failure mode that shipped in v1.0.1 and v1.0.2."
+            exit 1
+          }
+          Write-Host "Binary started and loaded PySide6 successfully."
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 8. Lockfile drift — requirements-build.txt is what CI actually installs,
+  #    and it only changes when someone remembers to regenerate it.  That is
+  #    how yt-dlp stayed pinned two and a half months behind its own allowed
+  #    range while YouTube extraction quietly rotted.
+  # ────────────────────────────────────────────────────────────────────────────
+  lockfile-drift:
+    # Windows, not ubuntu: requirements-build.txt is resolved for Windows (it
+    # contains pywin32-ctypes and omits the Linux-only keyring backends, and
+    # carries no environment markers).  Regenerating it on Linux produces a
+    # legitimately different file, so this check would fail on every run.
+    name: Lockfile up to date
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install pip-tools
+        run: pip install pip-tools --quiet
+
+      - name: Check requirements-build.txt matches requirements.txt
+        shell: bash
+        run: |
+          cp requirements-build.txt requirements-build.committed
+          pip-compile requirements.txt --generate-hashes --resolver=backtracking             --no-header --output-file requirements-build.txt --allow-unsafe --quiet
+          # Ignore pure line-ending differences: the committed file is written
+          # on Windows, and git may check it out with either convention.
+          if ! diff -q --strip-trailing-cr requirements-build.committed requirements-build.txt > /dev/null; then
+            echo "::error::requirements-build.txt is out of date with requirements.txt."
+            echo "::error::Run scripts/generate-lockfile.ps1 and commit the result."
+            diff --strip-trailing-cr requirements-build.committed requirements-build.txt || true
+            exit 1
+          fi
+          echo "OK: lockfile is up to date."

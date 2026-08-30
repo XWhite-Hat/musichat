@@ -22,11 +22,10 @@ import re
 import subprocess
 import sys
 import threading
-from typing import Optional
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-from tunnel.base import TunnelBase  # noqa: E402
+from tunnel.base import TunnelBase
 
 URL_PATTERN = re.compile(r"https://[a-z0-9-]+\.ts\.net(?:/\S*)?")
 _LETSENCRYPT_LIMIT_PATTERN = re.compile(r"rateLimited|too many certificates", re.IGNORECASE)
@@ -40,8 +39,8 @@ _LETSENCRYPT_COOLDOWN_SECONDS = 168 * 3600
 class TailscaleTunnel(TunnelBase):
     def __init__(self, local_port: int) -> None:
         super().__init__(local_port)
-        self._proc: Optional[subprocess.Popen] = None
-        self._thread: Optional[threading.Thread] = None
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
 
     def _do_start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -80,7 +79,7 @@ class TailscaleTunnel(TunnelBase):
                         try:
                             until = datetime.datetime.strptime(
                                 retry_match.group(1), "%Y-%m-%dT%H:%M:%S.%fZ"
-                            ).replace(tzinfo=datetime.timezone.utc).timestamp()
+                            ).replace(tzinfo=datetime.UTC).timestamp()
                         except ValueError:
                             until = None
                     if until is not None:

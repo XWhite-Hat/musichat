@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import Callable, Optional
+from collections.abc import Callable
 
 # Windows Virtual-Key codes for the dedicated media cluster
 _VK_MEDIA_NEXT_TRACK  = 0xB0
@@ -33,12 +33,12 @@ class HotkeyManager:
     """Register global media-key hotkeys using the most reliable method available."""
 
     def __init__(self) -> None:
-        self.on_play_pause: Optional[Callable[[], None]] = None
-        self.on_next_track: Optional[Callable[[], None]] = None
-        self.on_prev_track: Optional[Callable[[], None]] = None
+        self.on_play_pause: Callable[[], None] | None = None
+        self.on_next_track: Callable[[], None] | None = None
+        self.on_prev_track: Callable[[], None] | None = None
 
         self._active          = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._win32_tid: int  = 0
         self._win32_hook      = None   # keep HOOKPROC alive (prevents GC)
         self._kb_hooked       = False
@@ -230,10 +230,10 @@ class HotkeyManager:
     # ── Internal ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _fire(cb: Optional[Callable[[], None]]) -> None:
+    def _fire(cb: Callable[[], None] | None) -> None:
         if cb is None:
             return
         try:
             cb()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[hotkeys] callback error: {exc}")

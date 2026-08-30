@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from config import TwitchConfig
@@ -52,7 +52,7 @@ class ChannelPointsListener:
 
     def __init__(
         self,
-        cfg: "TwitchConfig",
+        cfg: TwitchConfig,
         controller,                           # TwitchBot — holds callbacks
         loop: asyncio.AbstractEventLoop,
     ) -> None:
@@ -60,6 +60,32 @@ class ChannelPointsListener:
         self._ctrl = controller
         self._loop = loop
         self._stop_event = asyncio.Event()
+        # Strong references to fire-and-forget tasks.  The event loop only
+        # keeps a weak reference, so a task that nothing else holds can be
+        # garbage-collected before it finishes — which here would mean the
+        # EventSub subscription silently never happens and channel-point
+        # redemptions stop working with no error anywhere.
+        self._bg_tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro, name: str) -> None:
+        """
+        Run *coro* in the background, keeping a strong reference until it ends.
+
+        Also logs failures: a bare ensure_future() swallows any exception into
+        the task object, so a failed subscription would otherwise be invisible.
+        """
+        task = asyncio.ensure_future(coro)
+        self._bg_tasks.add(task)
+
+        def _done(t: asyncio.Task) -> None:
+            self._bg_tasks.discard(t)
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                print(f"[cp] background task {name!r} failed: {exc!r}")
+
+        task.add_done_callback(_done)
 
     # ── Public ─────────────────────────────────────────────────────────────────
 
@@ -79,24 +105,23 @@ class ChannelPointsListener:
 
         while not self._stop_event.is_set():
             try:
-                async with aiohttp.ClientSession() as http:
-                    async with http.ws_connect(
-                        url,
-                        heartbeat=20,
-                        receive_timeout=None,
-                    ) as ws:
-                        print(f"[cp] EventSub WS connected ({url[:72]})")
-                        backoff = 1.0  # reset on successful connect
-                        reconnect_url = await self._pump(ws, http)
-                        if reconnect_url:
-                            url = reconnect_url
-                            print(f"[cp] session_reconnect → {url[:72]}")
-                            continue
-                        if self._stop_event.is_set():
-                            break   # clean exit — stop() called or revocation
-                        # WS closed without a reconnect URL — fall through to
-                        # the backoff/retry path by raising so the except block fires.
-                        raise RuntimeError("EventSub WS closed unexpectedly")
+                async with aiohttp.ClientSession() as http, http.ws_connect(
+                    url,
+                    heartbeat=20,
+                    receive_timeout=None,
+                ) as ws:
+                    print(f"[cp] EventSub WS connected ({url[:72]})")
+                    backoff = 1.0  # reset on successful connect
+                    reconnect_url = await self._pump(ws, http)
+                    if reconnect_url:
+                        url = reconnect_url
+                        print(f"[cp] session_reconnect → {url[:72]}")
+                        continue
+                    if self._stop_event.is_set():
+                        break   # clean exit — stop() called or revocation
+                    # WS closed without a reconnect URL — fall through to
+                    # the backoff/retry path by raising so the except block fires.
+                    raise RuntimeError("EventSub WS closed unexpectedly")
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -119,7 +144,7 @@ class ChannelPointsListener:
         self,
         ws,           # aiohttp ClientWebSocketResponse
         http,         # aiohttp ClientSession (for subscribe calls)
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Drive the WebSocket message loop until the connection closes.
 
@@ -137,7 +162,7 @@ class ChannelPointsListener:
 
             try:
                 msg = await asyncio.wait_for(ws.receive(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
             if msg.type in (
@@ -166,7 +191,7 @@ class ChannelPointsListener:
                 keepalive_timeout = float(sess.get("keepalive_timeout_seconds", 15))
                 print(f"[cp] session_welcome id={session_id[:16]}… "
                       f"keepalive={keepalive_timeout}s")
-                asyncio.ensure_future(self._subscribe(http, session_id))
+                self._spawn(self._subscribe(http, session_id), "subscribe")
 
             elif msg_type == "session_keepalive":
                 pass  # timestamp already reset above

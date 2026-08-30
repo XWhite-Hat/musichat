@@ -6,8 +6,8 @@ import asyncio
 import time as _time
 import uuid
 from collections import deque
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import datetime, UTC
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -152,7 +152,7 @@ def log_action(action: str, actor: str, detail: dict) -> None:
     """Append an entry to the action log.  Called from route handlers and app.py."""
     entry = {
         "id": str(uuid.uuid4())[:8],
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "action": action,
         "actor": actor,
         **detail,
@@ -204,7 +204,7 @@ def _require_auth(
 # ── Models ─────────────────────────────────────────────────────────────────────
 
 class SkipRequest(BaseModel):
-    track_id: Optional[str] = None  # idempotency guard: reject if current doesn't match
+    track_id: str | None = None  # idempotency guard: reject if current doesn't match
 
 
 class RemoveRequest(BaseModel):
@@ -312,7 +312,7 @@ async def play_pause(req: PlayPauseRequest, username: str = Depends(_require_aut
 
 
 class PrevRequest(BaseModel):
-    track_id: Optional[str] = None  # what the client thought was playing; None = nothing
+    track_id: str | None = None  # what the client thought was playing; None = nothing
 
 
 @router.post("/prev")

@@ -16,7 +16,7 @@ import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Callable, Optional
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlparse
 
 from constants import (
@@ -32,7 +32,7 @@ from constants import (
 
 # ── Global serialisation — only one auth session at a time ────────────────────
 _SESSION_LOCK = threading.Lock()
-_active_session: Optional["OAuthCallbackServer"] = None
+_active_session: OAuthCallbackServer | None = None
 
 
 _DONE_HTML = """\
@@ -86,7 +86,7 @@ class OAuthCallbackServer:
         self.on_failure = on_failure
         self._byoi  = is_byoi_mode()
         self._state = secrets.token_urlsafe(20)
-        self._server: Optional[HTTPServer] = None
+        self._server: HTTPServer | None = None
         self._done   = False
 
     # ── Public API ─────────────────────────────────────────────────────────────

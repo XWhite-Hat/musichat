@@ -17,7 +17,7 @@ import queue
 import threading
 import time
 from enum import Enum, auto
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 
@@ -35,9 +35,9 @@ try:
 except ImportError:
     sd = None  # type: ignore
 
-from player.fft import FFTPipeline  # noqa: E402
-from player.queue_manager import QueueManager, Track  # noqa: E402
-from player.thread_gate import DecodeGate  # noqa: E402
+from player.fft import FFTPipeline
+from player.queue_manager import QueueManager, Track
+from player.thread_gate import DecodeGate
 
 
 class PlayState(Enum):
@@ -65,7 +65,7 @@ class PlaybackEngine:
         sample_rate: int = 48000,
         channels: int = 2,
         blocksize: int = 1024,
-        output_device: Optional[int] = None,
+        output_device: int | None = None,
     ) -> None:
         self.queue_manager = queue_manager
         self.fft = fft_pipeline
@@ -76,12 +76,12 @@ class PlaybackEngine:
 
         self._state = PlayState.STOPPED
         self._volume = 1.0           # linear 0–1
-        self._pcm_queue: queue.Queue[Optional[np.ndarray]] = queue.Queue(
+        self._pcm_queue: queue.Queue[np.ndarray | None] = queue.Queue(
             maxsize=self.PCM_QUEUE_SIZE
         )
-        self._stream: Optional[object] = None  # sd.OutputStream
-        self._decode_thread: Optional[threading.Thread] = None
-        self._current_track: Optional[Track] = None
+        self._stream: object | None = None  # sd.OutputStream
+        self._decode_thread: threading.Thread | None = None
+        self._current_track: Track | None = None
         # Per-generation stop events — each decode thread receives its own
         # Event at spawn time.  _stop_current() sets the current generation's
         # event; _play_pcm() issues a fresh one for the next generation.
@@ -89,7 +89,13 @@ class PlaybackEngine:
         # two tracks to play simultaneously or produced rapid-fire fragments.
         self._gate = DecodeGate()
         self._closed = False         # set by close() to block new decode threads
-        self._remainder: Optional[np.ndarray] = None
+        self._remainder: np.ndarray | None = None
+        # Incremented by the realtime audio callback, drained by
+        # report_underruns() on the Qt thread.  A plain int += is fine
+        # here: CPython makes it atomic enough for a counter that only one
+        # thread increments, and it costs no allocation on the audio path.
+        self._underrun_count = 0
+        self._underruns_reported = 0
         self._yt_proc = None  # yt-dlp subprocess for web streams
 
         # Position tracking
@@ -113,9 +119,9 @@ class PlaybackEngine:
         self._last_audio_source: str = ""         # cached direct stream URL
 
         # Callbacks
-        self.on_state_changed: Optional[Callable[[PlayState], None]] = None
-        self.on_track_started: Optional[Callable[[Track], None]] = None
-        self.on_visualiser_mode: Optional[Callable[[bool], None]] = None
+        self.on_state_changed: Callable[[PlayState], None] | None = None
+        self.on_track_started: Callable[[Track], None] | None = None
+        self.on_visualiser_mode: Callable[[bool], None] | None = None
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -185,7 +191,7 @@ class PlaybackEngine:
         else:
             self.stop()
 
-    def set_output_device(self, device: Optional[int]) -> None:
+    def set_output_device(self, device: int | None) -> None:
         """Hot-swap the output device. Restarts the stream at the current position
         if a track is playing so the change is immediate."""
         self.output_device = device
@@ -289,14 +295,12 @@ class PlaybackEngine:
         """sounddevice output callback — runs on a high-priority audio thread."""
         # Bail out if this callback belongs to a stream that has been superseded
         if stream_gen != self._stream_generation:
-            _dbg("sd_callback STALE", f"gen={stream_gen} cur={self._stream_generation} — bailing")
             outdata[:] = 0
             raise sd.CallbackStop()
 
         filled = 0
         stop = False
         underrun = False
-        _prev_frames = self._frames_played
 
         # Drain any leftover samples from the previous callback first.
         # Use in-place multiply (np.multiply with out=) to avoid creating a
@@ -340,24 +344,17 @@ class PlaybackEngine:
         # Advance position by real audio frames only (not silence filler).
         if filled > 0:
             self._frames_played += filled
-            if _prev_frames == 0 and self._frames_played > 0:
-                _dbg("sd_callback AUDIO",
-                     f"first real audio — frames_played now {self._frames_played} "
-                     f"({self._frames_played/self.sample_rate:.3f}s)")
 
         # Log underruns — the position at which they occur tells us whether a
         # DASH segment boundary is the culprit (repeatable timestamp each play).
+        # Underruns are counted, not logged.  This runs on the PortAudio
+        # realtime thread, where a print() means string formatting, an
+        # allocation and blocking I/O — the exact things that cause the next
+        # underrun.  report_underruns() drains this from the Qt thread.
         if underrun:
-            fp = self._frames_played
-            _dbg("sd_callback UNDERRUN",
-                 f"queue empty at frames_played={fp} "
-                 f"({fp/self.sample_rate:.3f}s) — silence inserted, "
-                 f"queue_size={self._pcm_queue.qsize()}")
+            self._underrun_count += 1
 
         if stop:
-            _dbg("sd_callback END",
-                 f"sentinel received, frames_played={self._frames_played} "
-                 f"({self._frames_played/self.sample_rate:.3f}s)")
             raise sd.CallbackStop()
 
     def _sd_finished(self, stream_gen: int) -> None:
@@ -598,6 +595,21 @@ class PlaybackEngine:
             print(f"[engine] decode error: {exc}")
         finally:
             self._pcm_queue.put(None)
+
+    def report_underruns(self) -> int:
+        """
+        Return the number of audio underruns since the last call, logging any.
+
+        Call from the Qt thread (a timer, or on track change) — never from the
+        audio callback, which must stay free of I/O and allocation.
+        """
+        total = self._underrun_count
+        new   = total - self._underruns_reported
+        if new > 0:
+            self._underruns_reported = total
+            print(f"[engine] {new} audio underrun(s) since last check "
+                  f"({total} total this session)")
+        return new
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 

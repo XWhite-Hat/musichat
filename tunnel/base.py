@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from collections.abc import Callable
 
 
 class TunnelBase(ABC):
@@ -33,7 +34,7 @@ class TunnelBase(ABC):
     # deliberately do NOT require a 200 from the specific probed route —
     # that would also fail if that route's behavior/auth ever changes,
     # which has nothing to do with whether the tunnel itself is working.
-    _CLOUDFLARE_ORIGIN_ERROR_CODES = {521, 522, 523, 524, 525, 526, 530}
+    _CLOUDFLARE_ORIGIN_ERROR_CODES: ClassVar[set[int]] = {521, 522, 523, 524, 525, 526, 530}
     # How long to wait for the tunnel binary to print a URL at all before
     # treating it as stuck.  Without this, a binary that hangs or never
     # prints the expected line blocks forever with zero feedback.
@@ -58,22 +59,22 @@ class TunnelBase(ABC):
 
     def __init__(self, local_port: int) -> None:
         self.local_port = local_port
-        self.public_url: Optional[str] = None
-        self.on_url_assigned: Optional[Callable[[str], None]] = None
+        self.public_url: str | None = None
+        self.on_url_assigned: Callable[[str], None] | None = None
         # on_error(message, fatal) — fatal=False means a retry is already
         # scheduled; fatal=True means the tunnel gave up and needs a manual
         # restart (or a config fix, e.g. a missing binary).
-        self.on_error: Optional[Callable[[str, bool], None]] = None
+        self.on_error: Callable[[str, bool], None] | None = None
         # on_progress(message) — lightweight, non-error status updates (e.g.
         # "verifying... 2/6") so a long verification/wait window is never
         # silent, even when nothing has actually gone wrong yet.
-        self.on_progress: Optional[Callable[[str], None]] = None
+        self.on_progress: Callable[[str], None] | None = None
         # on_rate_limited(until_unix_ts, reason) — the provider itself
         # rejected tunnel creation as rate-limited.  Distinct from on_error
         # because the correct response isn't "retry with backoff", it's
         # "stop entirely until this specific time" — a persistent, provider-
         # scoped lockout the caller is expected to remember across restarts.
-        self.on_rate_limited: Optional[Callable[[float, str], None]] = None
+        self.on_rate_limited: Callable[[float, str], None] | None = None
         self._restart_count = 0
         # Set by stop() — checked by the self-heal loop so a stop requested
         # while it's sleeping in a backoff window actually cancels the
@@ -96,8 +97,8 @@ class TunnelBase(ABC):
     def _emit_rate_limited(
         self,
         reason: str,
-        cooldown_seconds: Optional[float] = None,
-        until: Optional[float] = None,
+        cooldown_seconds: float | None = None,
+        until: float | None = None,
     ) -> None:
         """
         Provider rejected tunnel creation as rate-limited.  Marks a lockout
@@ -152,7 +153,7 @@ class TunnelBase(ABC):
     def is_running(self) -> bool:
         return self.public_url is not None
 
-    def _start_url_watchdog(self) -> "threading.Timer":
+    def _start_url_watchdog(self) -> threading.Timer:
         """
         Start a timer that force-kills the tunnel process if no URL has
         appeared within _URL_WAIT_TIMEOUT seconds.  Subclasses block reading

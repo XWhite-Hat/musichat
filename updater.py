@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import threading
 import urllib.request
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from version import APP_VERSION
 
@@ -23,7 +23,7 @@ _STARTUP_DELAY = 15  # seconds after boot before the first check
 
 # ── State (module-level, thread-safe reads for simple bool/str) ────────────────
 _lock            = threading.Lock()
-_latest_version: Optional[str] = None
+_latest_version: str | None = None
 _update_available: bool         = False
 
 
@@ -61,7 +61,7 @@ def check_now() -> dict:
     return get_status()
 
 
-def start_background_check(on_update_found: Optional[Callable[[str], None]] = None) -> None:
+def start_background_check(on_update_found: Callable[[str], None] | None = None) -> None:
     """
     Kick off a one-shot daemon thread that waits _STARTUP_DELAY seconds then
     checks GitHub.  Calls on_update_found(latest_tag) on the calling thread's
@@ -83,19 +83,11 @@ def start_background_check(on_update_found: Optional[Callable[[str], None]] = No
 # ── Semver helpers ──────────────────────────────────────────────────────────────
 
 def _parse_ver(v: str) -> tuple:
-    """Parse a version string to a comparable tuple, ignoring pre-release suffixes."""
-    parts = []
-    for seg in v.split(".")[:3]:
-        try:
-            parts.append(int(seg))
-        except ValueError:
-            parts.append(0)
-    while len(parts) < 3:
-        parts.append(0)
-    return tuple(parts)
+    """Deprecated alias — kept so existing callers/tests keep working."""
+    from version_utils import parse_version
+    return parse_version(v)
 
 
 def _is_newer(remote: str, local: str) -> bool:
-    if not remote or local == "dev":
-        return False
-    return _parse_ver(remote) > _parse_ver(local)
+    from version_utils import is_newer
+    return is_newer(remote, local)

@@ -11,7 +11,6 @@ Never call from the Qt main thread — yt-dlp can take several seconds.
 from __future__ import annotations
 
 import unicodedata
-from typing import Optional
 
 from player.queue_manager import RequestOrigin, Track, TrackSource
 
@@ -57,7 +56,7 @@ def resolve(
     query: str,
     requested_by: str = "",
     origin: RequestOrigin = RequestOrigin.CHAT,
-) -> Optional[Track]:
+) -> Track | None:
     """
     Resolve a URL or plain-text search query to a Track with full metadata.
 

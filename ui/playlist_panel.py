@@ -15,12 +15,11 @@ Layout
 from __future__ import annotations
 
 import re as _re
-from typing import Optional
 
 _TOPIC_SUFFIX = _re.compile(r'\s*[-–]\s*Topic\s*$', _re.IGNORECASE)
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QHBoxLayout,
@@ -37,8 +36,8 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from player.playlist_manager import Playlist, PlaylistManager, PlaylistTrack  # noqa: E402
-from player.queue_manager import QueueManager  # noqa: E402
+from player.playlist_manager import Playlist, PlaylistManager, PlaylistTrack
+from player.queue_manager import QueueManager
 
 
 class PlaylistPanel(QWidget):
@@ -61,12 +60,12 @@ class PlaylistPanel(QWidget):
         self,
         playlist_manager: PlaylistManager,
         queue_manager: QueueManager,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._pm = playlist_manager
         self._qm = queue_manager
-        self._selected_playlist: Optional[Playlist] = None
+        self._selected_playlist: Playlist | None = None
 
         self._build_ui()
         self._pm.on_changed.append(self._refresh_playlists)
@@ -174,10 +173,7 @@ class PlaylistPanel(QWidget):
             dur = pl.total_duration()
             m, s = divmod(dur, 60)
             h, m = divmod(m, 60)
-            if h:
-                dur_str = f"{h}:{m:02d}:{s:02d}"
-            else:
-                dur_str = f"{m}:{s:02d}"
+            dur_str = f'{h}:{m:02d}:{s:02d}' if h else f'{m}:{s:02d}'
             item = QListWidgetItem(f"{pl.name}  ({pl.track_count()} tracks)")
             item.setData(Qt.ItemDataRole.UserRole, pl.id)
             item.setToolTip(f"{pl.track_count()} tracks · {dur_str}")
@@ -360,7 +356,7 @@ class PlaylistPanel(QWidget):
 _UNAVAIL_TITLES = frozenset({"[deleted video]", "[private video]", "[unavailable]"})
 
 
-def _is_unavailable(entry: Optional[dict]) -> bool:
+def _is_unavailable(entry: dict | None) -> bool:
     if entry is None:
         return True
     title = (entry.get("title") or "").strip().lower()
@@ -376,7 +372,7 @@ def _is_unavailable(entry: Optional[dict]) -> bool:
 _YT_VIDEO_ID_RE = _re.compile(r'^[A-Za-z0-9_-]{11}$')
 
 
-def _is_playable(entry: Optional[dict]) -> bool:
+def _is_playable(entry: dict | None) -> bool:
     """Return False for non-track entries (channel pages, mixes, etc.)."""
     if entry is None:
         return False
@@ -386,9 +382,7 @@ def _is_playable(entry: Optional[dict]) -> bool:
     # Entries with an explicit zero duration are non-video metadata rows.
     # Allow None/missing — yt-dlp sometimes omits duration for valid tracks.
     duration = entry.get("duration")
-    if duration is not None and duration == 0:
-        return False
-    return True
+    return not (duration is not None and duration == 0)
 
 
 def _entry_to_playlist_track(entry: dict) -> PlaylistTrack:
@@ -451,7 +445,7 @@ class ImportPlaylistDialog(QDialog):
         self.setMinimumWidth(500)
         self._pm = pm
         self._valid_tracks: list[PlaylistTrack] = []
-        self._thread: Optional[_PlaylistFetchThread] = None
+        self._thread: _PlaylistFetchThread | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -517,7 +511,7 @@ class ImportPlaylistDialog(QDialog):
         self._thread.finished.connect(self._on_fetch_done)
         self._thread.start()
 
-    def _on_fetch_done(self, info: Optional[dict]) -> None:
+    def _on_fetch_done(self, info: dict | None) -> None:
         self._check_btn.setEnabled(True)
         self._check_btn.setText("Import")
 

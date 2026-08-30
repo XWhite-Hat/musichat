@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 import threading
 import webbrowser
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import uvicorn
 
@@ -25,20 +25,20 @@ class SettingsServerManager:
     def __init__(
         self,
         cfg: AppConfig,
-        bot_restart_cb:    Optional[Callable[[], None]] = None,
-        spec_changed_cb:   Optional[Callable[[], None]] = None,
-        tunnel_start_cb:   Optional[Callable[[], None]] = None,
-        tunnel_stop_cb:    Optional[Callable[[], None]] = None,
-        device_changed_cb: Optional[Callable] = None,
-        data_reset_cb:     Optional[Callable[[], None]] = None,
-        data_wipe_cb:      Optional[Callable[[], None]] = None,
+        bot_restart_cb:    Callable[[], None] | None = None,
+        spec_changed_cb:   Callable[[], None] | None = None,
+        tunnel_start_cb:   Callable[[], None] | None = None,
+        tunnel_stop_cb:    Callable[[], None] | None = None,
+        device_changed_cb: Callable | None = None,
+        data_reset_cb:     Callable[[], None] | None = None,
+        data_wipe_cb:      Callable[[], None] | None = None,
         port: int = SETTINGS_PORT,
     ) -> None:
         self.cfg    = cfg
         self.port   = port
         self._token = secrets.token_urlsafe(16)
-        self._thread: Optional[threading.Thread] = None
-        self._server: Optional[uvicorn.Server]   = None
+        self._thread: threading.Thread | None = None
+        self._server: uvicorn.Server | None   = None
 
         from server.settings_app import create_settings_app
         self.app = create_settings_app(

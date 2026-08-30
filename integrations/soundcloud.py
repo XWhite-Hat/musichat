@@ -8,7 +8,6 @@ PyAV → sounddevice so PCM fan-out to the FFT pipeline works.
 
 from __future__ import annotations
 
-from typing import Optional
 
 import requests
 
@@ -45,7 +44,7 @@ class SoundCloudClient:
             print(f"[soundcloud] search error: {e}")
             return []
 
-    def resolve_url(self, url: str) -> Optional[Track]:
+    def resolve_url(self, url: str) -> Track | None:
         """Resolve a soundcloud.com track URL to a Track."""
         try:
             resp = self._session.get(
@@ -62,7 +61,7 @@ class SoundCloudClient:
             print(f"[soundcloud] resolve error: {e}")
         return None
 
-    def get_stream_url(self, track_id: int) -> Optional[str]:
+    def get_stream_url(self, track_id: int) -> str | None:
         """
         Returns the progressive stream URL for a track.
         This URL can be passed directly to PyAV for decoding.

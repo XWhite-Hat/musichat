@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import secrets as _secrets
+import time as _time
 from pathlib import Path
-from typing import Any, Callable, Optional, Set
+from typing import Any
+from collections.abc import Callable
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -34,7 +36,7 @@ _BUNDLE_ROOT = Path(getattr(_sys, "_MEIPASS", Path(__file__).parent.parent))
 _STATIC = _BUNDLE_ROOT / "server" / "static" / "settings"
 
 # ── Fields that must never be written via PATCH ───────────────────────────────
-BLOCKED_PATCH: Set[str] = {
+BLOCKED_PATCH: set[str] = {
     "twitch.streamer_token",
     "twitch.streamer_refresh_token",
     "twitch.streamer_token_issued_at",
@@ -56,7 +58,7 @@ BLOCKED_PATCH: Set[str] = {
 }
 
 # ── Fields that require a bot restart to take effect ─────────────────────────
-RESTART_REQUIRED: Set[str] = {
+RESTART_REQUIRED: set[str] = {
     "twitch.prefix",
     "twitch.use_separate_bot",
     "twitch.command_aliases",   # aliases are baked into the bot at startup
@@ -68,7 +70,7 @@ RESTART_REQUIRED: Set[str] = {
 # push messages to all connected settings-page tabs without importing the whole
 # FastAPI app.
 
-_settings_ws_manager: "Optional[_WSManager]" = None
+_settings_ws_manager: _WSManager | None = None
 
 # Last-known tunnel status — cached so GET /api/tunnel/status works on page
 # load even before a WS connection is established, and so a state that
@@ -124,7 +126,7 @@ def broadcast_to_settings(msg: dict) -> None:
 class _WSManager:
     def __init__(self) -> None:
         self._clients: list[WebSocket] = []
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
@@ -200,14 +202,14 @@ def mask_config(cfg: AppConfig) -> dict:
 class PatchRequest(BaseModel):
     path: str                          # dotted path, e.g. "twitch.channel"
     value: Any
-    preset_name: Optional[str] = None  # if set, "spectrogram.*" patches target THIS preset
+    preset_name: str | None = None  # if set, "spectrogram.*" patches target THIS preset
                                        # instead of the active one.  Lets the settings page
                                        # edit any preset without switching active_preset_name.
 
 
 class PresetCreateRequest(BaseModel):
     name: str
-    copy_from: Optional[str] = None   # name of an existing preset to copy from
+    copy_from: str | None = None   # name of an existing preset to copy from
 
 
 class PresetRenameRequest(BaseModel):
@@ -256,13 +258,13 @@ strong{color:#ccc}
 def create_settings_app(
     cfg: AppConfig,
     launch_token: str,
-    bot_restart_cb:    Optional[Callable[[], None]] = None,
-    spec_changed_cb:   Optional[Callable[[], None]] = None,
-    tunnel_start_cb:   Optional[Callable[[], None]] = None,
-    tunnel_stop_cb:    Optional[Callable[[], None]] = None,
-    device_changed_cb: Optional[Callable[[Optional[int]], None]] = None,
-    data_reset_cb:     Optional[Callable[[], None]] = None,
-    data_wipe_cb:      Optional[Callable[[bool], None]] = None,
+    bot_restart_cb:    Callable[[], None] | None = None,
+    spec_changed_cb:   Callable[[], None] | None = None,
+    tunnel_start_cb:   Callable[[], None] | None = None,
+    tunnel_stop_cb:    Callable[[], None] | None = None,
+    device_changed_cb: Callable[[int | None], None] | None = None,
+    data_reset_cb:     Callable[[], None] | None = None,
+    data_wipe_cb:      Callable[[bool], None] | None = None,
 ) -> FastAPI:
     """
     Build and return the settings FastAPI app.
@@ -282,7 +284,22 @@ def create_settings_app(
     ws_manager = _WSManager()
     _settings_ws_manager = ws_manager   # expose for broadcast_to_settings()
     _token_store = {"token": launch_token, "used": False}
-    _session_tokens: set[str] = set()
+    # session token -> monotonic expiry.  Previously an unbounded set: every
+    # settings-page load added an entry that was never removed, so tokens
+    # stayed valid for the life of the process and the set grew without limit.
+    _session_tokens: dict[str, float] = {}
+    _SESSION_TTL = 12 * 60 * 60   # 12 h — comfortably longer than a stream
+
+    def _prune_sessions() -> None:
+        now = _time.monotonic()
+        for tok in [t for t, exp in _session_tokens.items() if exp <= now]:
+            _session_tokens.pop(tok, None)
+
+    def _session_valid(tok: str) -> bool:
+        if not tok:
+            return False
+        _prune_sessions()
+        return tok in _session_tokens
 
     # Every /api/* and /ws request must present a valid settings_session cookie.
     # The cookie is issued when the settings page is first loaded with the launch
@@ -292,7 +309,7 @@ def create_settings_app(
     async def _api_auth_middleware(request: Request, call_next):
         if request.url.path.startswith("/api/") or request.url.path == "/ws":
             tok = request.cookies.get("settings_session", "")
-            if tok not in _session_tokens:
+            if not _session_valid(tok):
                 return JSONResponse({"error": "Not authenticated"}, status_code=403)
         return await call_next(request)
 
@@ -386,14 +403,17 @@ def create_settings_app(
     @app.get("/settings")
     async def settings_page(token: str = Query("")):
         if not _token_store["used"]:
-            if token != _token_store["token"]:
+            # compare_digest, not !=: ordinary string comparison short-circuits
+            # on the first differing byte and leaks token content by timing.
+            if not _secrets.compare_digest(token, str(_token_store["token"])):
                 return HTMLResponse(_STALE_SESSION_HTML, status_code=200)
             _token_store["used"] = True
         html_path = _STATIC / "index.html"
         if not html_path.exists():
             return HTMLResponse("<h1>settings/index.html not found</h1>", status_code=500)
         session_tok = _secrets.token_hex(16)
-        _session_tokens.add(session_tok)
+        _prune_sessions()
+        _session_tokens[session_tok] = _time.monotonic() + _SESSION_TTL
         fr = FileResponse(str(html_path), media_type="text/html")
         fr.set_cookie("settings_session", session_tok, httponly=True, samesite="strict", path="/")
         return fr
@@ -419,13 +439,13 @@ def create_settings_app(
             if val.startswith("data:"):
                 if not _re.fullmatch(r'data:[a-zA-Z0-9/+\-.]+;base64,[A-Za-z0-9+/=]+', val):
                     raise HTTPException(400, "text_font_import: data URI must be base64-encoded")
-            elif val and not (val.startswith("http://") or val.startswith("https://")):
+            elif val and not (val.startswith(("http://", "https://"))):
                 raise HTTPException(400, "text_font_import must be an http/https URL or base64 data URI")
 
         try:
             _apply_patch(cfg, path, req.value, preset_name=req.preset_name)
         except (AttributeError, KeyError, TypeError, ValueError) as e:
-            raise HTTPException(400, f"Cannot set '{path}': {e}")
+            raise HTTPException(400, f"Cannot set '{path}': {e}") from e
 
         save_config(cfg)
 
@@ -574,10 +594,10 @@ def create_settings_app(
                         'There is a conflicting "Song Request" channel point reward on your '
                         "channel that was not created by this app. Please delete it from the "
                         "Twitch dashboard (Viewer Rewards → Channel Points) and try again.",
-                    )
+                    ) from _e
                 _reward_recovered = True
             else:
-                raise HTTPException(502, _msg)
+                raise HTTPException(502, _msg) from _e
 
         if not reward:
             raise HTTPException(502, "Twitch returned an empty reward list — try again.")
@@ -964,10 +984,29 @@ def create_settings_app(
     @app.post("/api/data/open-folder")
     async def data_open_folder():
         """Open the data directory in the OS file explorer."""
-        from data_dir import DATA_DIR
+        import asyncio
+        import os
         import subprocess
+        import sys
+
+        from data_dir import DATA_DIR
+
+        def _open() -> None:
+            if sys.platform == "win32":
+                # Full path, not a bare "explorer": a bare name is resolved
+                # through PATH, which need not be the Windows file manager.
+                explorer = os.path.join(
+                    os.environ.get("SYSTEMROOT", r"C:\Windows"), "explorer.exe"
+                )
+                subprocess.Popen([explorer, DATA_DIR])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["/usr/bin/open", DATA_DIR])
+            else:
+                subprocess.Popen(["xdg-open", DATA_DIR])
+
         try:
-            subprocess.Popen(["explorer", DATA_DIR])
+            # Spawning a process blocks; keep it off the event loop.
+            await asyncio.get_running_loop().run_in_executor(None, _open)
         except Exception as exc:
             return JSONResponse({"error": str(exc)}, status_code=500)
         return {"ok": True}
@@ -1113,7 +1152,7 @@ def create_settings_app(
 
 # ── Patch helper ──────────────────────────────────────────────────────────────
 
-def _apply_patch(cfg: AppConfig, path: str, value: Any, preset_name: Optional[str] = None) -> None:
+def _apply_patch(cfg: AppConfig, path: str, value: Any, preset_name: str | None = None) -> None:
     """
     Apply a dotted-path value to the config dataclass tree.
 
@@ -1199,26 +1238,22 @@ def _clamp_spectrogram(preset: object, attr: str) -> None:
 def _set_typed(obj: object, attr: str, value: Any) -> None:
     """Set attr on a dataclass instance, coercing value to the field's type."""
     import dataclasses as _dc
-    import typing
+
+    from dataclass_utils import field_type_for, unwrap_optional
+
     fields = {f.name: f for f in _dc.fields(obj)}
     if attr not in fields:
         raise AttributeError(f"'{attr}' is not a dataclass field")
 
-    field_type = fields[attr].type
-    if isinstance(field_type, str):
-        import sys
-        field_type = eval(field_type, sys.modules[type(obj).__module__].__dict__)
+    field_type = field_type_for(type(obj), attr)
 
-    # Unwrap Optional[X] (i.e. Union[X, None]).
+    # Unwrap Optional[X] (i.e. Union[X, None] or the PEP 604 X | None form).
     # If the incoming value is None or empty-string, store None and return.
     # Otherwise unwrap to X so the coercion below applies correctly.
-    origin = getattr(field_type, "__origin__", None)
-    if origin is typing.Union:
-        inner = [t for t in field_type.__args__ if t is not type(None)]
-        if value is None or value == "":
-            setattr(obj, attr, None)
-            return
-        field_type = inner[0] if len(inner) == 1 else field_type
+    field_type, optional = unwrap_optional(field_type)
+    if optional and (value is None or value == ""):
+        setattr(obj, attr, None)
+        return
 
     # Coerce to the declared type (basic scalars only — list/dict stay as-is)
     if field_type is bool or field_type == "bool":
