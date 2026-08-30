@@ -17,6 +17,7 @@ Endpoints
 from __future__ import annotations
 
 import json
+import functools
 import os
 import queue
 import threading
@@ -197,14 +198,24 @@ def _sync_broadcasters() -> None:
 
 # ── HTTP endpoints ─────────────────────────────────────────────────────────────
 
-@router.get("/overlay", response_class=HTMLResponse)
-async def overlay_page():
-    """Serves the HTML5 Canvas spectrogram overlay page."""
+@functools.lru_cache(maxsize=1)
+def _overlay_html() -> str:
+    """The overlay page, read once and cached.
+
+    Reading it inside the handler blocks the event loop on every request; the
+    file is bundled and never changes while the app is running.
+    """
     html_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "static", "spectrogram_overlay.html")
     )
-    with open(html_path, "r", encoding="utf-8") as fh:
-        return HTMLResponse(fh.read())
+    with open(html_path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+@router.get("/overlay", response_class=HTMLResponse)
+async def overlay_page():
+    """Serves the HTML5 Canvas spectrogram overlay page."""
+    return HTMLResponse(_overlay_html())
 
 
 @router.get("/config/{preset_name}")

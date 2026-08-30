@@ -29,7 +29,6 @@ import io
 import queue
 import re
 import threading
-from typing import Optional
 
 import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -51,7 +50,7 @@ _np_clients: list[queue.Queue] = []
 _np_lock = threading.Lock()
 
 # Event loop reference — needed to schedule async fan-out from Qt/engine thread
-_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop: asyncio.AbstractEventLoop | None = None
 
 # Simple in-process thumbnail cache: thumbnail_url → raw image bytes
 _thumb_cache: dict[str, bytes] = {}
@@ -137,14 +136,14 @@ def _format_track(track) -> str:
 
     display = f"{display_artist} — {clean_title}" if display_artist else clean_title
 
-    kwargs = dict(
-        title        = clean_title,
-        artist       = display_artist,   # full merged credit (e.g. "KoruSe, mzmff")
-        display      = display,
-        requested_by = track.requested_by or "",
-        source       = track.source.name.lower() if hasattr(track.source, "name") else "",
-        duration     = f"{mins}:{secs:02d}",
-    )
+    kwargs = {
+        "title": clean_title,
+        "artist": display_artist,   # full merged credit (e.g. "KoruSe, mzmff")
+        "display": display,
+        "requested_by": track.requested_by or "",
+        "source": track.source.name.lower() if hasattr(track.source, "name") else "",
+        "duration": f"{mins}:{secs:02d}",
+    }
     try:
         return template.format(**kwargs)
     except (KeyError, ValueError, IndexError):
@@ -548,7 +547,7 @@ def _youtube_fallback_urls(url: str) -> list[str]:
     ]
 
 
-async def _fetch_thumbnail(url: str) -> Optional[bytes]:
+async def _fetch_thumbnail(url: str) -> bytes | None:
     """
     Fetch thumbnail bytes with an in-process LRU cache.
 
@@ -656,7 +655,7 @@ async def albumart_raw(shape: str):
     # prev-track, history double-click — any play path that fires on_track_started)
     thumb_url = getattr(_current_track, "thumbnail_url", "") if _current_track else ""
 
-    raw: Optional[bytes] = None
+    raw: bytes | None = None
     if thumb_url:
         raw = await _fetch_thumbnail(thumb_url)
 

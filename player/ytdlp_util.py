@@ -10,7 +10,6 @@ both frozen and non-frozen environments.
 from __future__ import annotations
 
 import threading
-from typing import Optional
 
 # yt-dlp is not safe to call concurrently from multiple threads within the same
 # process — it uses global extractor state and module-level caches that race.
@@ -28,7 +27,7 @@ def resolve_direct_url(page_url: str) -> str:
     """
     with _YTDLP_LOCK:
         try:
-            import yt_dlp  # noqa: PLC0415
+            import yt_dlp
             opts = {
                 "format":     "bestaudio/best",
                 "noplaylist": True,
@@ -51,7 +50,7 @@ def resolve_direct_url(page_url: str) -> str:
             return ""
 
 
-def resolve_playlist(url: str) -> Optional[dict]:
+def resolve_playlist(url: str) -> dict | None:
     """
     Fetch playlist entries via flat extraction (fast — no per-video resolve).
 
@@ -61,7 +60,7 @@ def resolve_playlist(url: str) -> Optional[dict]:
     """
     with _YTDLP_LOCK:
         try:
-            import yt_dlp  # noqa: PLC0415
+            import yt_dlp
             opts = {
                 "quiet":         True,
                 "no_warnings":   True,
@@ -78,7 +77,7 @@ def resolve_playlist(url: str) -> Optional[dict]:
             return None
 
 
-def dump_info(query: str, no_playlist: bool = True) -> Optional[dict]:
+def dump_info(query: str, no_playlist: bool = True) -> dict | None:
     """
     Return the yt-dlp info dict for a URL or search query, or None on failure.
 
@@ -87,7 +86,7 @@ def dump_info(query: str, no_playlist: bool = True) -> Optional[dict]:
     """
     with _YTDLP_LOCK:
         try:
-            import yt_dlp  # noqa: PLC0415
+            import yt_dlp
             opts = {
                 "quiet":      True,
                 "no_warnings": True,

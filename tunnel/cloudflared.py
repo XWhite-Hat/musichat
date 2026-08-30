@@ -42,11 +42,10 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-from tunnel.base import TunnelBase  # noqa: E402
+from tunnel.base import TunnelBase
 
 URL_PATTERN = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 _LEVEL_PATTERN = re.compile(r"\b(ERR|WRN)\b")
@@ -62,9 +61,9 @@ _RATE_LIMIT_PATTERN = re.compile(r"rate limit exceeded|\b429\b", re.IGNORECASE)
 class CloudflareTunnel(TunnelBase):
     def __init__(self, local_port: int) -> None:
         super().__init__(local_port)
-        self._proc: Optional[subprocess.Popen] = None
-        self._thread: Optional[threading.Thread] = None
-        self._metrics_addr: Optional[str] = None  # set once cloudflared logs it
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
+        self._metrics_addr: str | None = None  # set once cloudflared logs it
 
     def _do_start(self) -> None:
         self._metrics_addr = None
@@ -130,8 +129,8 @@ class CloudflareTunnel(TunnelBase):
         # the moment we saw the URL, a metrics line arriving afterward would
         # never be seen, and _verify_via_readiness would wait forever for an
         # address that already went by on a pipe nobody was draining.
-        found_url: list[Optional[str]] = [None]
-        rate_limited: list[Optional[str]] = [None]
+        found_url: list[str | None] = [None]
+        rate_limited: list[str | None] = [None]
         url_found = threading.Event()
 
         def _read_output() -> None:

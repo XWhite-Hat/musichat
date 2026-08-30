@@ -16,7 +16,7 @@ import json
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from data_dir import DATA_DIR
 from player.queue_manager import Track, TrackSource
@@ -36,7 +36,7 @@ class PlaylistTrack:
     source: str = "YOUTUBE"       # TrackSource.name
 
     @classmethod
-    def from_track(cls, t: Track) -> "PlaylistTrack":
+    def from_track(cls, t: Track) -> PlaylistTrack:
         return cls(
             title=t.title,
             artist=t.artist,
@@ -100,7 +100,7 @@ class PlaylistManager:
     def playlists(self) -> list[Playlist]:
         return list(self._playlists)
 
-    def get(self, playlist_id: str) -> Optional[Playlist]:
+    def get(self, playlist_id: str) -> Playlist | None:
         for pl in self._playlists:
             if pl.id == playlist_id:
                 return pl
@@ -168,8 +168,8 @@ class PlaylistManager:
     # ── Queue integration ──────────────────────────────────────────────────────
 
     def create_from_playlist_tracks(
-        self, name: str, tracks: "list[PlaylistTrack]"
-    ) -> "Playlist":
+        self, name: str, tracks: list[PlaylistTrack]
+    ) -> Playlist:
         """Create a new playlist pre-populated with tracks in a single save."""
         pl = Playlist(name=name.strip() or "Imported Playlist")
         pl.tracks = list(tracks)
@@ -198,7 +198,7 @@ class PlaylistManager:
         if not os.path.exists(PLAYLISTS_PATH):
             return
         try:
-            with open(PLAYLISTS_PATH, "r", encoding="utf-8") as fh:
+            with open(PLAYLISTS_PATH, encoding="utf-8") as fh:
                 raw = json.load(fh)
             for pl_data in raw.get("playlists", []):
                 tracks = [

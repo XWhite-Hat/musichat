@@ -20,7 +20,6 @@ import secrets
 import threading
 import time
 from collections import deque
-from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -85,6 +84,14 @@ def _real_client_ip(request: Request) -> str:
     return peer or "unknown"
 
 
+def _read_static(*parts: str) -> str:
+    """Load a bundled static file from disk.  Call at startup, not per request."""
+    import os
+    path = os.path.join(os.path.dirname(__file__), "static", *parts)
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
     app = FastAPI(title="StreamDeck Mod Panel", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -146,14 +153,14 @@ def create_app(cfg: AppConfig, queue_manager, on_ready=None) -> FastAPI:
         ico = os.path.join(os.path.dirname(__file__), "static", "favicon.ico")
         return FileResponse(ico, media_type="image/x-icon")
 
+    # Read once at startup rather than per request: this file never changes at
+    # runtime, and an open()/read() inside an async handler blocks the event
+    # loop for every other in-flight request on this server.
+    _panel_html = _read_static("index.html")
+
     @app.get("/", response_class=HTMLResponse)
     async def serve_panel(request: Request):
-        import os
-        html_path = os.path.join(
-            os.path.dirname(__file__), "static", "index.html"
-        )
-        with open(html_path, "r", encoding="utf-8") as fh:
-            return HTMLResponse(fh.read())
+        return HTMLResponse(_panel_html)
 
     # ── Auth flow ───────────────────────────────────────────────────────────────
     #
@@ -579,10 +586,10 @@ class ServerManager:
     def __init__(self, cfg: AppConfig, queue_manager) -> None:
         self.cfg = cfg
         self.app = create_app(cfg, queue_manager, on_ready=self._on_ready)
-        self._thread: Optional[threading.Thread] = None
-        self._server: Optional[uvicorn.Server] = None
-        self.on_ready: Optional[callable] = None
-        self.on_error: Optional[callable] = None
+        self._thread: threading.Thread | None = None
+        self._server: uvicorn.Server | None = None
+        self.on_ready: callable | None = None
+        self.on_error: callable | None = None
 
     def start(self) -> None:
         uc = uvicorn.Config(

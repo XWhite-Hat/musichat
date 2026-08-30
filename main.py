@@ -55,18 +55,18 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from PySide6.QtCore import QObject, Signal as _Signal  # noqa: E402
-from PySide6.QtGui import QFontDatabase  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QObject, Signal as _Signal
+from PySide6.QtGui import QFontDatabase
+from PySide6.QtWidgets import QApplication
 
-from config import load_config, save_config  # noqa: E402
-from player.engine import PlaybackEngine  # noqa: E402
-from player.fft import FFTPipeline  # noqa: E402
-from player.playlist_manager import PlaylistManager  # noqa: E402
-from player.queue_manager import QueueManager  # noqa: E402
-from server.routes import spectrogram as spec_routes  # noqa: E402
-from theme import APP_QSS  # noqa: E402
-from ui.main_window import MainWindow, show_vibe_ack_dialog  # noqa: E402
+from config import load_config, save_config
+from player.engine import PlaybackEngine
+from player.fft import FFTPipeline
+from player.playlist_manager import PlaylistManager
+from player.queue_manager import QueueManager
+from server.routes import spectrogram as spec_routes
+from theme import APP_QSS
+from ui.main_window import MainWindow, show_vibe_ack_dialog
 
 
 class _MainThreadInvoker(QObject):
@@ -165,7 +165,7 @@ def _stop_tunnel(tunnel_ref: list) -> None:
         tunnel_ref[0] = None
 
 
-def _get_active_lockout(cfg, mode: str) -> "dict | None":
+def _get_active_lockout(cfg, mode: str) -> dict | None:
     """
     Return the lockout record for `mode` (e.g. {"until": ts, "reason": str})
     if one is still active, auto-clearing (and persisting the clear) once its
@@ -345,8 +345,8 @@ def _start_tunnel(cfg, window: MainWindow, tunnel_ref: list) -> None:
 
 
 def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
-               tunnel_ref: list = None, vibe_needs_disarm: list = None,
-               playlist_shuffle_active: list = None) -> None:
+               tunnel_ref: list | None = None, vibe_needs_disarm: list | None = None,
+               playlist_shuffle_active: list | None = None) -> None:
     if vibe_needs_disarm is None:
         vibe_needs_disarm = [False]
     if playlist_shuffle_active is None:
@@ -394,7 +394,7 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
     def on_chat(username: str, message: str) -> None:
         _gui(lambda: window.append_chat(f"[{username}] {message}"))
 
-    def on_song_request(query: str, username: str) -> None:
+    def on_song_request(query: str, username: str, queue_limit: int = 0) -> None:
         """Resolve query to a track in a background thread, then enqueue it."""
         _gui(lambda: window.append_chat(f"[req] @{username}: {query!r} — looking up..."))
 
@@ -409,7 +409,16 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
                 bot.announce_failure(username, query)
                 return
 
-            pos = queue.enqueue_request(track)
+            # The bot checked the cap before dispatching here, but resolving the
+            # track above took a network round-trip — enqueue_request re-checks
+            # under its own lock so simultaneous requests can't both slip past.
+            pos = queue.enqueue_request(track, max_for_user=queue_limit)
+            if pos == -1:
+                _gui(lambda: window.append_chat(
+                    f"[req] @{username}: queue limit reached — request dropped"
+                ))
+                bot.announce_limit_reached(username)
+                return
             if vibe:
                 vibe.on_user_request(track)
             pos_str = "will play next" if pos == 1 else f"#{pos} in queue"
@@ -662,7 +671,7 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
 
     # ── All skip paths → refund CP redemption ──────────────────────────────────
     # Defined here so _cancel_current_cp and bot are both in scope.
-    from server.routes import queue as _queue_routes  # noqa: E402
+    from server.routes import queue as _queue_routes
 
     def _skip_with_refund() -> None:
         _cancel_current_cp()
@@ -1194,7 +1203,7 @@ def main() -> int:
     queue.on_queue_changed.append(_on_queue_changed)
 
     # Playlist loaded via "Add all to queue" → vibe engine context (no shuffle state)
-    def _on_playlist_started(playlist, shuffled: bool) -> None:  # noqa: ARG001
+    def _on_playlist_started(playlist, shuffled: bool) -> None:
         vibe_on = _vibe_enabled[0]
         vibe.on_playlist_started(playlist.tracks, vibe_enabled=vibe_on)
         if vibe_on:
@@ -1452,26 +1461,86 @@ def main() -> int:
     return result
 
 
-if __name__ == "__main__":
-    import traceback
-    import pathlib
+def _write_crash_log(header: str, text: str) -> None:
+    """Append a crash entry to <data_dir>/crash.log.  Never raises."""
     import datetime
-    from data_dir import DATA_DIR as _DATA_DIR
-    _log_dir = pathlib.Path(_DATA_DIR)
-    _log_dir.mkdir(parents=True, exist_ok=True)
-    _crash_log = _log_dir / "crash.log"
+    import pathlib
+    # Also emit through stdout, which logging_setup tees into musichat.log —
+    # so the main log tells the whole story without needing a second file.
     try:
-        sys.exit(main())
+        print(f"[crash] {header}\n{text}")
+    except Exception:
+        pass
+    try:
+        from data_dir import DATA_DIR as _DATA_DIR
+        _log_dir = pathlib.Path(_DATA_DIR)
+        # Directory may have been deleted by data_wipe(); recreate it.
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        _ts = datetime.datetime.now().isoformat(timespec="seconds")
+        with (_log_dir / "crash.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"[{_ts}] {header}\n{text}\n")
+    except Exception:
+        # Logging a crash must never itself crash (or mask) the real failure.
+        pass
+
+
+def _install_thread_excepthook() -> None:
+    """
+    Log unhandled exceptions raised in background threads.
+
+    Without this, a crash in the Twitch bot, decode, tunnel or server thread
+    only ever prints to a stdout that a windowed (console=False) build does
+    not have — so it vanishes entirely and the app just misbehaves with no
+    trace of why.  These threads are exactly where yt-dlp, network and
+    playback work happens, so they are the ones worth capturing.
+    """
+    import threading
+    import traceback
+
+    def _hook(args) -> None:
+        if args.exc_type is SystemExit:
+            return
+        _write_crash_log(
+            f"unhandled exception in thread {args.thread.name!r}",
+            "".join(traceback.format_exception(
+                args.exc_type, args.exc_value, args.exc_traceback
+            )),
+        )
+
+    threading.excepthook = _hook
+
+
+def run() -> int:
+    """
+    Entry point used by BOTH launcher.py (frozen binary) and __main__ below.
+
+    The crash logging here used to live under `if __name__ == "__main__"`,
+    which meant it never ran in the shipped binary at all: launcher.py does
+    `from main import main`, so main.py's __name__ is "main", not "__main__".
+    Every crash in every release therefore went unlogged, leaving nothing to
+    diagnose from.  Keeping this in a function both entry points call is what
+    makes crash.log actually exist in the frozen app.
+    """
+    import traceback
+
+    # Before anything else: a windowed build has no stdout, so without this
+    # every diagnostic in the app is a silent no-op.  Must come first so that
+    # failures during startup are captured too.
+    import logging_setup
+    logging_setup.install()
+
+    _install_thread_excepthook()
+    try:
+        return main()
     except BaseException as _exc:
         # SystemExit(0) is a clean quit — don't write a crash log for it.
         # SystemExit with a non-zero code or any other exception is a real crash.
         if isinstance(_exc, SystemExit) and (_exc.code == 0 or _exc.code is None):
             raise
-        _ts = datetime.datetime.now().isoformat(timespec="seconds")
-        try:
-            # Directory may have been deleted by data_wipe(); recreate it.
-            _log_dir.mkdir(parents=True, exist_ok=True)
-            _crash_log.write_text(f"[{_ts}]\n{traceback.format_exc()}\n")
-        except OSError:
-            pass
+        _write_crash_log("unhandled exception on main thread",
+                         traceback.format_exc())
         raise
+
+
+if __name__ == "__main__":
+    sys.exit(run())

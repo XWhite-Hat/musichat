@@ -25,12 +25,11 @@ import hashlib
 import json
 import time
 import uuid
-from typing import Optional
 
 # ── Module-level keypair (Streamer PC keypair, loaded once at startup) ────────
 
 _private_key = None           # EC P-256 private key
-_public_jwk: Optional[dict] = None  # public key as JWK dict
+_public_jwk: dict | None = None  # public key as JWK dict
 
 # ── JTI replay prevention (in-memory, resets on process restart) ──────────────
 
@@ -74,7 +73,7 @@ def load_or_generate() -> dict:
     return dict(_public_jwk)
 
 
-def get_public_jwk() -> Optional[dict]:
+def get_public_jwk() -> dict | None:
     """Return the current public JWK, or None if not yet initialized."""
     return dict(_public_jwk) if _public_jwk else None
 

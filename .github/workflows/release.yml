@@ -196,6 +196,16 @@ jobs:
             exit 1
           fi
 
+      # ── Unit tests ─────────────────────────────────────────────────────────
+      # Runs against the same hash-pinned dependency set that is about to be
+      # frozen into the binary, so a release can never ship logic that the
+      # suite rejects.
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: pytest tests/ -q
+
       # ── PyInstaller build ──────────────────────────────────────────────────
       - name: Build binary
         run: >
@@ -205,6 +215,38 @@ jobs:
           --distpath dist
         env:
           MUSICHAT_VERSION: ${{ needs.validate-tag.outputs.version }}
+
+      # ── Verify the artifact actually starts ────────────────────────────────
+      # This gate exists because v1.0.1 and v1.0.2 were both built, signed,
+      # attested and published as binaries that could not start at all: one was
+      # missing a runtime dependency, the other an unbundled python3.dll.
+      # Nothing between "Build binary" and "Sign artifact" would have noticed.
+      #
+      # PySide6 is downloaded on first run rather than bundled, so a full launch
+      # would need a display.  Instead drive the binary's own smoke-test mode,
+      # which runs the real bootstrap, loads every native DLL and imports
+      # PySide6 — exactly the path that failed in both releases.
+      - name: Verify the built binary starts and can load PySide6
+        shell: pwsh
+        run: |
+          $dataDir = Join-Path $env:RUNNER_TEMP "musichat-release-smoke"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+
+          python -c "import sys; sys.path.insert(0,'.'); from pathlib import Path; from pyside_downloader import download_pyside6; ok,msg = download_pyside6(Path(r'$dataDir') / 'pyside6'); print('PySide6 download:', ok, msg); sys.exit(0 if ok else 1)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Could not fetch PySide6 to validate the build."
+            exit 1
+          }
+
+          $p = Start-Process -FilePath "dist\musichat.exe" `
+                             -ArgumentList "--pyside6-smoke-test", $dataDir `
+                             -PassThru -Wait -NoNewWindow
+          if ($p.ExitCode -ne 0) {
+            Write-Host "::error::The built binary could not load PySide6 (exit $($p.ExitCode))."
+            Write-Host "::error::Refusing to sign and publish a binary that cannot start."
+            exit 1
+          }
+          Write-Host "Artifact verified: binary starts and loads PySide6."
 
       # ── Install cosign ─────────────────────────────────────────────────────
       - name: Install cosign

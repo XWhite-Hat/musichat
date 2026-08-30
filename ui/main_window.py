@@ -1,4 +1,4 @@
-﻿"""
+"""
 Main application window.
 
 Layout (top → bottom)
@@ -19,8 +19,9 @@ Layout (top → bottom)
 
 from __future__ import annotations
 
+from typing import ClassVar
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import sys
 
@@ -66,12 +67,13 @@ from server.routes import spectrogram as spec_routes
 from theme import APP_QSS, GREEN
 from ui.playlist_panel import PlaylistPanel
 from ui.spectrogram_widget import SpectrogramWidget
+from datetime import UTC
 
 
 class LedIndicator(QLabel):
     """Small status LED."""
 
-    COLOURS = {
+    COLOURS: ClassVar[dict] = {
         "green":  "background:#00ff41; border-radius:5px; border:1px solid #00cc33;",
         "red":    "background:#ff3333; border-radius:5px; border:1px solid #cc0000;",
         "yellow": "background:#ff9500; border-radius:5px; border:1px solid #cc7700;",
@@ -142,10 +144,10 @@ class TunnelStatusWidget(QWidget):
 
 def _rel_time(iso_ts: str) -> str:
     """Return a human-readable relative time string from a UTC ISO 8601 timestamp."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     try:
         dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-        diff = int((datetime.now(timezone.utc) - dt).total_seconds())
+        diff = int((datetime.now(UTC) - dt).total_seconds())
     except Exception:
         return iso_ts[11:19] if len(iso_ts) >= 19 else iso_ts
     if diff < 10:
@@ -164,7 +166,7 @@ def _rel_time(iso_ts: str) -> str:
 class ActionsPanel(QWidget):
     """Mirror of the mod panel action log — tabular view of recent actions."""
 
-    _COLS = ["time", "actor", "action", "track"]
+    _COLS: ClassVar[list[str]] = ["time", "actor", "action", "track"]
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -263,7 +265,7 @@ class NowPlayingCard(QFrame):
         self._save_btn.setEnabled(False)
         layout.addWidget(self._save_btn)
 
-    def update_track(self, track: Optional[Track]) -> None:
+    def update_track(self, track: Track | None) -> None:
         has_track = track is not None
         self._save_btn.setEnabled(has_track)
         if not has_track:
@@ -278,7 +280,7 @@ class NowPlayingCard(QFrame):
         self._artist_lbl.setText(_disp_artist or "")
         self._source_lbl.setText(f"[{track.source.name}]")
 
-    def update_vibe_seed(self, seed_name: Optional[str]) -> None:
+    def update_vibe_seed(self, seed_name: str | None) -> None:
         """Show or hide the vibe-match attribution line. Text is used as-is."""
         if seed_name:
             self._vibe_lbl.setText(seed_name)
@@ -594,8 +596,8 @@ class ModeBar(QFrame):
     # Emitted when playlist-shuffle mode is ended by any means (button, stop, etc.)
     playlist_shuffle_ended    = Signal()
 
-    _REPEAT_CYCLE  = ["off", "one", "all"]
-    _REPEAT_LABELS = {
+    _REPEAT_CYCLE: ClassVar[list[str]] = ["off", "one", "all"]
+    _REPEAT_LABELS: ClassVar[dict[str, str]] = {
         "off": "↺  repeat: off",
         "one": "↺  repeat: one",
         "all": "↺  repeat: all",
@@ -960,12 +962,12 @@ class MainWindow(QMainWindow):
         self._pm = playlist_manager
         self._sc = soundcloud_client
         self._search_track_cache: list = []  # Track objects matching current results
-        self._current_track: Optional[Track] = None   # for "save to playlist"
+        self._current_track: Track | None = None   # for "save to playlist"
         self._history = PlayHistory()
         # Colours extracted from the last track's cover art.  Cached so that
         # enabling cover_art_match mid-song can apply them instantly without a
         # re-fetch.  Cleared when playback stops entirely.
-        self._cached_art_colours: Optional[tuple[str, str, str]] = None
+        self._cached_art_colours: tuple[str, str, str] | None = None
 
         # ── User-stop state ────────────────────────────────────────────────────
         # True when the user clicked ■ stop. The stopped track is at position 0
@@ -983,7 +985,7 @@ class MainWindow(QMainWindow):
         # Wired by main.py — called on a background thread after the wipe
         # sequence has shown the splash.  Should clear credentials + config dir
         # then invoke QApplication.quit() on the main thread.
-        self.on_wipe_shutdown: Optional[Callable[[], None]] = None
+        self.on_wipe_shutdown: Callable[[], None] | None = None
 
         self.setWindowTitle("> musichat")
         self.setMinimumSize(900, 640)
@@ -1540,7 +1542,7 @@ class MainWindow(QMainWindow):
         elif action == "seek_back":
             self._seek_back()
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event) -> None:
         """
         Handle keyboard shortcuts for transport control.
 
@@ -1578,7 +1580,7 @@ class MainWindow(QMainWindow):
         if total > 0:
             self.engine.seek(fraction * total)
 
-    def set_vibe_seed(self, seed_name: Optional[str]) -> None:
+    def set_vibe_seed(self, seed_name: str | None) -> None:
         """Update the vibe-match attribution on the now-playing card.
 
         Safe to call from any thread — marshals to the Qt main thread.
@@ -1654,10 +1656,7 @@ class MainWindow(QMainWindow):
 
         tracks = []
         try:
-            if is_sc_url:
-                t = ytdlp.resolve_url(query)
-                tracks = [t] if t else []
-            elif is_yt_url:
+            if is_sc_url or is_yt_url:
                 t = ytdlp.resolve_url(query)
                 tracks = [t] if t else []
             elif "soundcloud" in query.lower():
@@ -1686,7 +1685,7 @@ class MainWindow(QMainWindow):
 
     # ── Add to playlist menus ──────────────────────────────────────────────────
 
-    def _build_playlist_menu(self, track: Optional[Track]) -> None:
+    def _build_playlist_menu(self, track: Track | None) -> None:
         """Show a QMenu to pick a playlist; add track if one is chosen."""
         if track is None:
             return
@@ -1745,7 +1744,7 @@ class MainWindow(QMainWindow):
         else:
             QApplication.instance().quit()
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event) -> None:
         """Tear down audio and timers before Qt starts destroying widgets.
 
         Stopping the engine here ensures sounddevice's finished_callback never
@@ -1839,8 +1838,14 @@ class MainWindow(QMainWindow):
     # ── Status bar ticks ───────────────────────────────────────────────────────
 
     def _tick_status(self) -> None:
-        # Updated by external components calling set_*_status()
-        pass
+        # Most status is pushed in by external components calling set_*_status().
+        # Audio underruns are the exception: the realtime callback can only
+        # increment a counter (logging from that thread is what causes
+        # underruns), so drain and report it here on the Qt thread instead.
+        try:
+            self.engine.report_underruns()
+        except Exception:
+            pass
 
     def set_tunnel_status(self, display: str, state: str, copy_url: str = "") -> None:
         self._tunnel_widget.set_status(display, state, copy_url)

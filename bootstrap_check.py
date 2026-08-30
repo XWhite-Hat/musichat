@@ -28,7 +28,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 # ── Bootstrap config location ──────────────────────────────────────────────────
 
@@ -182,7 +181,7 @@ def _run_smoke_test_subprocess(data_dir: str) -> None:
     sys.exit(0)
 
 
-def _read_bootstrap_config(path: Path) -> Optional[dict]:
+def _read_bootstrap_config(path: Path) -> dict | None:
     try:
         with path.open("r", encoding="utf-8") as fh:
             return json.load(fh)
@@ -206,7 +205,7 @@ def read_bootstrap_config() -> dict:
     return _read_bootstrap_config(_bootstrap_config_path()) or {}
 
 
-def _run_setup_wizard(cfg_path: Path) -> Optional[str]:
+def _run_setup_wizard(cfg_path: Path) -> str | None:
     from bootstrap_ui import run_setup_wizard
 
     # Just the parent — the wizard's "create a MusicHat folder inside this
@@ -225,7 +224,7 @@ def _run_setup_wizard(cfg_path: Path) -> Optional[str]:
     return data_dir
 
 
-def _run_recovery(data_dir: str, cfg_path: Path, reason: str = "missing") -> Optional[str]:
+def _run_recovery(data_dir: str, cfg_path: Path, reason: str = "missing") -> str | None:
     from bootstrap_ui import run_recovery_dialog
 
     result = run_recovery_dialog(data_dir, reason=reason)

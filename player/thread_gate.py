@@ -16,7 +16,6 @@ cleanly regardless of what happens to the engine state afterwards.
 from __future__ import annotations
 
 import threading
-from typing import Optional
 
 
 class DecodeGate:
@@ -41,7 +40,7 @@ class DecodeGate:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._current: Optional[threading.Event] = None
+        self._current: threading.Event | None = None
         self._closed = False
 
     # ── public API ─────────────────────────────────────────────────────────────

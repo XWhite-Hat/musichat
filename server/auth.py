@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import secrets
 import time
-from typing import Optional
 
 import jwt
 import requests
@@ -47,7 +46,7 @@ STATE_TTL = 300  # 5 minutes
 
 _STATE_STORE_CAP = 500  # max concurrent in-flight OAuth flows
 
-def generate_oauth_state() -> Optional[str]:
+def generate_oauth_state() -> str | None:
     now = time.time()
     # Prune expired states first so the cap isn't hit by abandoned flows.
     expired = [k for k, ts in _OAUTH_STATE_STORE.items() if now - ts >= STATE_TTL]
@@ -94,7 +93,7 @@ def get_twitch_user(
     access_token: str,
     client_id: str = "",
     broadcaster_id: str = "",
-) -> Optional[dict]:
+) -> dict | None:
     """
     Look up the Twitch user who owns *access_token*.
 
@@ -272,7 +271,7 @@ def refresh_access_token(
     refresh_token: str,
     worker_url: str,
     broadcaster_id: str = "",
-) -> Optional[dict]:
+) -> dict | None:
     """
     Exchange a refresh token for a new access token via the Worker /refresh
     endpoint.  Returns {access_token, refresh_token, expires_in} or None.
@@ -531,7 +530,7 @@ def create_channel_points_reward(
     access_token: str,
     title: str = "Song Request",
     client_id: str = "",
-) -> Optional[dict]:
+) -> dict | None:
     """
     Create a custom channel-point reward owned by this app's Client-Id.
 
@@ -655,7 +654,7 @@ def check_reward_exists(
 
 
 def issue_jwt(
-    username: str, secret: str, expiry_minutes: int = 120, jkt: Optional[str] = None
+    username: str, secret: str, expiry_minutes: int = 120, jkt: str | None = None
 ) -> str:
     payload = {
         "sub": username,
@@ -670,7 +669,7 @@ def issue_jwt(
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def verify_jwt(token: str, secret: str) -> Optional[dict]:
+def verify_jwt(token: str, secret: str) -> dict | None:
     """Returns the decoded payload (sub, exp, iat, optional cnf.jkt) on success, None on failure."""
     try:
         return jwt.decode(token, secret, algorithms=["HS256"])

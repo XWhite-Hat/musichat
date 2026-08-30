@@ -7,7 +7,6 @@ stays relevant to the current streaming session.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from player.queue_manager import Track
 
@@ -34,7 +33,7 @@ class PlayHistory:
 
     # ── Read ───────────────────────────────────────────────────────────────────
 
-    def previous(self) -> Optional[Track]:
+    def previous(self) -> Track | None:
         """The track played before the current one, or None."""
         if len(self._tracks) >= 2:
             return self._tracks[-2]

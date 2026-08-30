@@ -24,13 +24,12 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-import requests  # noqa: E402
+import requests
 
-from tunnel.base import TunnelBase  # noqa: E402
+from tunnel.base import TunnelBase
 
 _SESSION_LIMIT_PATTERN = re.compile(r"ERR_NGROK_108|simultaneous ngrok\D*session", re.IGNORECASE)
 _ERR_CODE_PATTERN = re.compile(r"ERR_NGROK_\d+")
@@ -46,8 +45,8 @@ class NgrokTunnel(TunnelBase):
         super().__init__(local_port)
         self.authtoken = authtoken
         self.custom_domain = custom_domain
-        self._proc: Optional[subprocess.Popen] = None
-        self._thread: Optional[threading.Thread] = None
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
 
     def _do_start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -90,7 +89,7 @@ class NgrokTunnel(TunnelBase):
             # just sit polling the local API for a URL that would never
             # appear.  Drain it on its own thread so the polling loop below
             # can react without blocking on stdout itself.
-            session_limited: list[Optional[str]] = [None]
+            session_limited: list[str | None] = [None]
 
             def _read_output() -> None:
                 try:

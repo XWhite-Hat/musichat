@@ -5,7 +5,6 @@ yt-dlp based search and URL resolution for YouTube and SoundCloud.
 from __future__ import annotations
 
 import re as _re
-from typing import Optional
 
 from player.queue_manager import Track, TrackSource
 from player.ytdlp_util import _YTDLP_LOCK
@@ -93,7 +92,7 @@ def _is_internal_host(netloc: str) -> bool:
         return False
 
 
-def resolve_url(url: str) -> Optional[Track]:
+def resolve_url(url: str) -> Track | None:
     """Resolve any YouTube or SoundCloud URL into a playable Track."""
     from urllib.parse import urlparse as _urlparse
     try:
@@ -116,7 +115,7 @@ def resolve_url(url: str) -> Optional[Track]:
         return None
 
 
-def get_stream_info(url: str) -> Optional[dict]:
+def get_stream_info(url: str) -> dict | None:
     """
     Return {'url': str, 'headers': dict} for the best audio stream.
     Headers must be forwarded to PyAV/FFmpeg so CDN servers don't reject
@@ -155,13 +154,13 @@ def get_stream_info(url: str) -> Optional[dict]:
         return None
 
 
-def get_stream_url(url: str) -> Optional[str]:
+def get_stream_url(url: str) -> str | None:
     """Convenience wrapper — returns URL only (no headers)."""
     info = get_stream_info(url)
     return info["url"] if info else None
 
 
-def get_suggestions(seed: "Track", count: int = 10) -> list["Track"]:
+def get_suggestions(seed: Track, count: int = 10) -> list[Track]:
     """
     Fetch vibe-matched suggestions for a seed track via YouTube's auto-radio.
 
@@ -177,7 +176,7 @@ def get_suggestions(seed: "Track", count: int = 10) -> list["Track"]:
 
         # Prefer the YouTube page URL (contains ?v=<id>); the stream_url is
         # a CDN audio URL that won't have a recognisable video ID in it.
-        vid_id: Optional[str] = None
+        vid_id: str | None = None
         for _seed_url in (seed.url, seed.stream_url):
             if not _seed_url:
                 continue
@@ -192,9 +191,8 @@ def get_suggestions(seed: "Track", count: int = 10) -> list["Track"]:
                 **_YDL_OPTS_SEARCH,
                 "playlistend": count + 2,   # +1 seed + 1 buffer
             }
-            with _YTDLP_LOCK:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(radio_url, download=False)
+            with _YTDLP_LOCK, yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(radio_url, download=False)
             entries = info.get("entries") or []
             # Skip the first entry — it's the seed itself
             results = [_entry_to_track(e) for e in entries[1:] if e]

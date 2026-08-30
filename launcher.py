@@ -14,6 +14,11 @@ bootstrap_check.run()
 
 # PySide6 is now on sys.path (or present in venv for dev mode).
 # Importing main triggers its module-level PySide6 imports.
-from main import main  # noqa: E402
+#
+# Call main.run(), not main.main() — run() installs the crash-log handlers.
+# Importing main() directly bypassed them entirely (main.py's __name__ is
+# "main" here, not "__main__"), which is why released builds never produced
+# a crash.log.
+from main import run
 
-sys.exit(main())
+sys.exit(run())

@@ -1,0 +1,51 @@
+# Ruff configuration.
+#
+# CI previously ran ruff with no config, which means default rules only:
+# pyflakes plus a handful of pycodestyle errors.  That is shallow enough that
+# several real defects shipped — a never-called function, a dangling asyncio
+# task, blocking I/O inside async handlers.  The rules below are the ones that
+# would actually have caught them.
+# ruff 0.8.6 does not know py314 yet; py313 is the closest and the rules we
+# enable behave identically for our purposes.
+target-version = "py313"
+line-length = 100
+exclude = [".venv", "build", "dist", "vendor", "cf_worker"]
+
+[lint]
+select = [
+    "E4", "E7", "E9", "F",   # the previous defaults — keep them
+    "B",                      # bugbear: mutable defaults, surprising behaviour
+    "ASYNC",                  # blocking calls inside async functions
+    "RUF",                    # ruff-specific, incl. RUF006 dangling tasks
+    "SIM",                    # simplification
+    "C4",                     # comprehension clarity
+    "PIE",
+    "UP",                     # pyupgrade — PEP 604 annotations etc.
+]
+ignore = [
+    "E402",     # deliberate: bootstrap must run before PySide6 imports
+    "SIM105",   # contextlib.suppress is not always clearer than try/except/pass
+    "UP038",
+    # Nested ifs are often clearer when the inner condition has its own
+    # explanatory comment; collapsing them would strand the comment.
+    "SIM102",
+    # The codebase deliberately uses typographic characters (— → ✓ …) in
+    # comments, docstrings and user-facing strings.  These were a genuine crash
+    # risk only because they reached a cp1252 console; logging_setup now writes
+    # UTF-8 with errors="replace", so they are safe and worth keeping.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[lint.per-file-ignores]
+# Wizard/bootstrap code runs before PySide6 exists and prints by design.
+"bootstrap_ui.py"     = ["T201"]
+"bootstrap_check.py"  = ["T201"]
+"tests/*"             = ["B011", "B017"]
+# B008 flags function calls in argument defaults, but Depends()/Body() in the
+# signature IS the FastAPI dependency-injection API — not an accident.
+"server/routes/*"     = ["B008"]
+"server/app.py"       = ["B008"]
+"server/settings_app.py" = ["B008"]
+# _fields_ is read off the class by the ctypes metaclass; it is a real
+# class-level constant, and annotating it buys nothing.
+"player/hotkeys.py"   = ["RUF012"]

@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import QRect, QRectF, Qt, QTimer, Signal
@@ -53,7 +52,7 @@ class SpectrogramWidget(QWidget):
 
     config_changed = Signal(object)
 
-    def __init__(self, cfg: SpectrogramConfig, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, cfg: SpectrogramConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.cfg = cfg
         self._init_arrays(cfg.bar_count)
@@ -179,7 +178,7 @@ class SpectrogramWidget(QWidget):
 
     # ── Painting ───────────────────────────────────────────────────────────────
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import random
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from player.queue_manager import QueueManager, Track
 
@@ -48,7 +48,7 @@ class VibeEngine:
     any thread.  Network I/O runs on a daemon worker thread to avoid blocking
     the Qt event loop."""
 
-    def __init__(self, queue: QueueManager, cfg: "YouTubeConfig") -> None:
+    def __init__(self, queue: QueueManager, cfg: YouTubeConfig) -> None:
         self._queue = queue
         self._cfg = cfg
         self._lock = threading.Lock()
@@ -57,7 +57,7 @@ class VibeEngine:
         self._enabled: bool = False
 
         # Seed track for YT suggestions.  None means "pick from playlist".
-        self._lynchpin: Optional[Track] = None
+        self._lynchpin: Track | None = None
 
         # Playlist context
         self._playlist_tracks: list[PlaylistTrack] = []
@@ -74,7 +74,7 @@ class VibeEngine:
         self._artist_history: list[str] = []
 
         # ID of the currently queued auto-suggestion.
-        self._auto_slot_id: Optional[str] = None
+        self._auto_slot_id: str | None = None
 
         # Non-auto tracks played since the last auto-fill.
         self._user_tracks_played: int = 0
@@ -86,10 +86,10 @@ class VibeEngine:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def on_vibe_toggled(self, enabled: bool, current_track: Optional[Track]) -> None:
+    def on_vibe_toggled(self, enabled: bool, current_track: Track | None) -> None:
         """Call when the vibe-match toggle changes state."""
         do_fill = False
-        evict_id: Optional[str] = None
+        evict_id: str | None = None
         with self._lock:
             self._enabled = enabled
             if enabled:
@@ -124,7 +124,7 @@ class VibeEngine:
 
     def on_playlist_started(
         self,
-        tracks: list["PlaylistTrack"],
+        tracks: list[PlaylistTrack],
         vibe_enabled: bool,
     ) -> None:
         """Call when a playlist begins playback."""
@@ -180,7 +180,7 @@ class VibeEngine:
         populated after the user's song finishes.
         """
         do_fill = False
-        evict_id: Optional[str] = None
+        evict_id: str | None = None
         with self._lock:
             if self._auto_slot_id:
                 evict_id = self._auto_slot_id   # remove outside lock (see on_vibe_toggled)
@@ -306,7 +306,7 @@ class VibeEngine:
         # Enqueue outside the lock
         self._queue.enqueue(suggestion)
 
-    def _pick_playlist_track_locked(self) -> Optional[Track]:
+    def _pick_playlist_track_locked(self) -> Track | None:
         """Random playlist pick with replay penalty.  Call with lock held."""
         if not self._playlist_tracks:
             return None
@@ -320,7 +320,7 @@ class VibeEngine:
         pt = random.choice(candidates)
         return pt.to_track()
 
-    def _random_playlist_seed_locked(self) -> Optional[Track]:
+    def _random_playlist_seed_locked(self) -> Track | None:
         """Random playlist track to use as a YT suggestion seed.  Lock held."""
         if not self._playlist_tracks:
             return None
@@ -331,7 +331,7 @@ class VibeEngine:
         seed: Track,
         recent_urls: list[str],
         artist_history: list[str],
-    ) -> Optional[Track]:
+    ) -> Track | None:
         """Fetch YT suggestions and pick one using URL + artist penalties."""
         try:
             import integrations.yt_dlp_client as ytdlp
