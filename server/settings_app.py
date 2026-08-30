@@ -1231,7 +1231,7 @@ def _clamp_spectrogram(preset: object, attr: str) -> None:
     if isinstance(val, (int, float)):
         clamped = max(lo, min(hi, val))
         if type(val) is int:
-            clamped = int(round(clamped))
+            clamped = round(clamped)   # round() already yields int here
         setattr(preset, attr, clamped)
 
 

@@ -3,5 +3,9 @@
 # Deliberately NOT in requirements.txt: none of this is shipped in the binary,
 # and requirements-build.txt is hash-pinned for reproducible release builds.
 # Install with:  pip install -r requirements-dev.txt
-pytest>=8.0
+#
+# ruff is pinned exactly (not >=) because lint results must be reproducible:
+# a floating ruff would let a new release fail CI on code nobody touched.
+# The CI lint job installs from THIS file so the two can never drift apart.
+pytest>=9.1.1
 ruff==0.16.5

@@ -103,7 +103,7 @@ def _dominant_rgb(img, n: int = 16) -> list[tuple[int, int, int]]:
     result: list[tuple[int, int, int]] = []
     for idx in sorted(freq, key=freq.__getitem__, reverse=True):
         r, g, b = palette[idx * 3], palette[idx * 3 + 1], palette[idx * 3 + 2]
-        h, s, v = _rgb_to_hsv(r, g, b)
+        _h, s, v = _rgb_to_hsv(r, g, b)   # hue unused here
 
         if s < 0.18:             # too grey / near-achromatic
             continue
@@ -125,7 +125,7 @@ def _sort_by_warmth(
     """Sort colours from warmest (red/orange/yellow) to coolest (blue/cyan)."""
 
     def warmth(rgb: tuple[int, int, int]) -> float:
-        h, s, v = _rgb_to_hsv(*rgb)
+        h, _s, _v = _rgb_to_hsv(*rgb)     # only hue drives warmth
         h_deg = h * 360.0
         # Circular distance from red (0° / 360°).
         # cos mapping: d=0 (red) → 1.0,  d=180 (cyan) → 0.0

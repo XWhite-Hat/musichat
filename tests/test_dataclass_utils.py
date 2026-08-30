@@ -29,7 +29,7 @@ class Outer:
     ratio: float = 0.0
     flag: bool = False
     maybe: int | None = None
-    legacy: typing.Optional[str] = None   # noqa: UP007 - the old form on purpose
+    legacy: typing.Optional[str] = None   # noqa: UP045 - the old form on purpose
     inner: Inner = field(default_factory=Inner)
     items: list = field(default_factory=list)
 

@@ -5,9 +5,7 @@
 # several real defects shipped — a never-called function, a dangling asyncio
 # task, blocking I/O inside async handlers.  The rules below are the ones that
 # would actually have caught them.
-# ruff 0.8.6 does not know py314 yet; py313 is the closest and the rules we
-# enable behave identically for our purposes.
-target-version = "py313"
+target-version = "py314"
 line-length = 100
 exclude = [".venv", "build", "dist", "vendor", "cf_worker"]
 
@@ -25,7 +23,6 @@ select = [
 ignore = [
     "E402",     # deliberate: bootstrap must run before PySide6 imports
     "SIM105",   # contextlib.suppress is not always clearer than try/except/pass
-    "UP038",
     # Nested ifs are often clearer when the inner condition has its own
     # explanatory comment; collapsing them would strand the comment.
     "SIM102",
