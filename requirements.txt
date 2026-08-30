@@ -11,7 +11,7 @@ cryptography>=50.0.0   # <50 has GHSA-g6cj-pr64-35w5 (Bleichenbacher oracle, HIG
 keyring>=25.7.0
 python-multipart>=0.0.32
 websockets>=16.1.1
-av>=17.1.0
+av>=18.1.0
 httpx>=0.28.1
 yt-dlp>=2026.8.19,<2027.1.0
 <<<<<<< HEAD
