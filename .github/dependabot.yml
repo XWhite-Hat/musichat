@@ -26,6 +26,13 @@ updates:
       # breaks the app.  Let pydantic own this; regenerate the lockfile when
       # pydantic bumps.
       - dependency-name: pydantic-core
+      # av must match vendor/av-<version>-cp314-cp314-win_amd64.whl exactly.
+      # The binary ships that vendored LGPL build, not the PyPI wheel (which
+      # bundles GPL x264/x265), so bumping this line alone makes the lockfile
+      # and SBOM describe a version that is not the one shipped.  Moving it
+      # requires rebuilding the wheel via scripts/build-lgpl-av.ps1 and
+      # updating the filename in the workflows — a deliberate manual step.
+      - dependency-name: av
 
   # GitHub Actions — weekly, SHA-pinned SHAs kept current.
   - package-ecosystem: github-actions

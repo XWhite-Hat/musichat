@@ -11,15 +11,26 @@ cryptography>=50.0.0   # <50 has GHSA-g6cj-pr64-35w5 (Bleichenbacher oracle, HIG
 keyring>=25.7.0
 python-multipart>=0.0.32
 websockets>=16.1.1
-av>=18.1.0
 httpx>=0.28.1
 yt-dlp>=2026.8.19,<2027.1.0
-<<<<<<< HEAD
-# Transitive (twitchio, yt-dlp) — floor set for security only:
+Pillow>=12.3.0         # <12.3 has GHSA-45hq-cxwh-f6vc (decompression-bomb bypass, HIGH)
+
+# Transitive (twitchio, yt-dlp) - floor pinned here for security only:
 # <3.14.3 has GHSA-cq5v-8q36-5273 (OOB heap read in the C parser, HIGH)
 aiohttp>=3.14.3
-Pillow>=12.3.0         # <12.3 has GHSA-45hq-cxwh-f6vc (decompression-bomb bypass, HIGH)
-=======
-Pillow>=12.3.0
->>>>>>> cb9f1cd95b25a04089b8b5cf9a48b80e267eeb92
-# keyboard>=0.13.5  # optional — global media keys; install manually if needed
+
+# -- av: pinned exactly, do not bump automatically ---------------------------
+# The shipped binary does NOT use the PyPI av wheel - that one bundles GPL
+# x264/x265.  It uses vendor/av-17.1.0-cp314-cp314-win_amd64.whl, an LGPL-only
+# build against FFmpeg 8.1, force-reinstalled over the PyPI one at build time.
+#
+# This pin must therefore match the vendored wheel exactly.  If it drifts above
+# it, the lockfile and the generated SBOM record a version that is not what
+# ships - which defeats the point of vendoring an LGPL build at all.
+#
+# To move it: rebuild the wheel with scripts/build-lgpl-av.ps1, update
+# vendor/SHA256SUMS and the filename in ci.yml / release.yml / build.ps1,
+# and only then bump this line.  Dependabot is configured to ignore av.
+av==17.1.0
+
+# keyboard>=0.13.5  # optional - global media keys; install manually if needed
