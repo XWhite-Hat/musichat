@@ -4,14 +4,6 @@ A music player for Twitch streamers. Your chat requests songs, you see a live sp
 
 ---
 
-## Acknowledgement of AI
-
-First and foremost I want to point out that I have used AI to help me create this project. My usual coding standards are so far removed from good practice that I decided instead of dumping a load of incoherent gibberish and calling it a project;
-I opted to use AI as a way of making sure my code is legible enough for anyone to read and understand.
-The core idea, implementation and percieved gaps in other applications I was filling were and are, entirely my own.
-
----
-
 ## What it does
 
 - **Chat song requests** — viewers use commands to add YouTube or SoundCloud tracks. Per-user queue limits, a `wrongsong`-like undo command (with automatic channel point refunds), and a pause-requests toggle for the streamer.
