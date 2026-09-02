@@ -1,4 +1,4 @@
-﻿"""
+"""
 MusicHat — entry point.
 
 Boot sequence
@@ -396,9 +396,19 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
 
     def on_song_request(query: str, username: str, queue_limit: int = 0) -> None:
         """Resolve query to a track in a background thread, then enqueue it."""
+        from player.moderation import check_request
+        # Screened before any lookup: a banned user should cost nothing, and a
+        # banned word in the request text needs no resolution to spot.
+        blocked = check_request(query, username, cfg.twitch)
+        if blocked:
+            print(f"[mod] rejected chat request — {blocked}")
+            _gui(lambda: window.append_chat(f"[req] @{username}: request blocked"))
+            return
+
         _gui(lambda: window.append_chat(f"[req] @{username}: {query!r} — looking up..."))
 
         def _resolve() -> None:
+            from player.moderation import check_resolved
             from player.resolver import resolve
             from player.queue_manager import RequestOrigin
 
@@ -407,6 +417,14 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
             if track is None:
                 _gui(lambda: window.append_chat(f"[req] @{username}: couldn't resolve {query!r}"))
                 bot.announce_failure(username, query)
+                return
+
+            # The request text may reveal nothing ("!sr that one song") while the
+            # resolved title or artist is on the banned list, so screen again.
+            blocked_after = check_resolved(track, cfg.twitch)
+            if blocked_after:
+                print(f"[mod] rejected chat request after resolve — {blocked_after}")
+                _gui(lambda: window.append_chat(f"[req] @{username}: request blocked"))
                 return
 
             # The bot checked the cap before dispatching here, but resolving the
@@ -467,9 +485,21 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
         when the song actually plays.  On failure the redemption is CANCELED
         immediately (refunds the viewer's points).
         """
+        from player.moderation import check_request
+        # Screened before the redemption is acted on.  Refunding immediately is
+        # the right outcome: the viewer spent points on something the streamer
+        # has said they do not want played.
+        blocked = check_request(query, username, cfg.twitch)
+        if blocked:
+            print(f"[mod] rejected channel-point request — {blocked}")
+            _gui(lambda: window.append_chat(f"[cp] @{username}: request blocked — refunding points"))
+            _cancel_cp(redemption_id, reward_id)
+            return
+
         _gui(lambda: window.append_chat(f"[cp] @{username}: {query!r} — looking up..."))
 
         def _resolve() -> None:
+            from player.moderation import check_resolved
             from player.resolver import resolve
             from player.queue_manager import RequestOrigin
 
@@ -480,6 +510,15 @@ def _start_bot(cfg, queue: QueueManager, window: MainWindow, vibe=None,
                     f"[cp] @{username}: couldn't resolve {query!r} — refunding points"
                 ))
                 bot.announce_failure(username, query)
+                _cancel_cp(redemption_id, reward_id)
+                return
+
+            blocked_after = check_resolved(track, cfg.twitch)
+            if blocked_after:
+                print(f"[mod] rejected channel-point request after resolve — {blocked_after}")
+                _gui(lambda: window.append_chat(
+                    f"[cp] @{username}: request blocked — refunding points"
+                ))
                 _cancel_cp(redemption_id, reward_id)
                 return
 

@@ -17,6 +17,18 @@ import threading
 # resolution, and metadata dumps are serialised.
 _YTDLP_LOCK = threading.Lock()
 
+# Every extraction runs while holding the lock above, so a slow call blocks
+# playback too — resolve_direct_url() needs the same lock to start the next
+# track.  These bounds keep any single call short.
+_SOCKET_TIMEOUT = 15          # seconds per network operation
+_FLAT_ENTRY_CAP = 60          # entries to enumerate from a playlist/channel
+
+_BASE_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "socket_timeout": _SOCKET_TIMEOUT,
+}
+
 
 def resolve_direct_url(page_url: str) -> str:
     """
@@ -29,10 +41,9 @@ def resolve_direct_url(page_url: str) -> str:
         try:
             import yt_dlp
             opts = {
+                **_BASE_OPTS,
                 "format":     "bestaudio/best",
                 "noplaylist": True,
-                "quiet":      True,
-                "no_warnings": True,
             }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(page_url, download=False)
@@ -62,8 +73,7 @@ def resolve_playlist(url: str) -> dict | None:
         try:
             import yt_dlp
             opts = {
-                "quiet":         True,
-                "no_warnings":   True,
+                **_BASE_OPTS,
                 "ignoreerrors":  True,
                 "extract_flat":  True,
             }
@@ -88,8 +98,7 @@ def dump_info(query: str, no_playlist: bool = True) -> dict | None:
         try:
             import yt_dlp
             opts = {
-                "quiet":      True,
-                "no_warnings": True,
+                **_BASE_OPTS,
                 "noplaylist": no_playlist,
             }
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -97,3 +106,37 @@ def dump_info(query: str, no_playlist: bool = True) -> dict | None:
         except Exception as exc:
             print(f"[ytdlp_util] dump_info failed: {exc}")
             return None
+
+
+def flat_entries(url: str, limit: int = _FLAT_ENTRY_CAP) -> list[dict]:
+    """
+    List the items of a playlist or channel WITHOUT resolving each one.
+
+    This exists because full extraction of a collection is catastrophically
+    slow: a bare playlist URL takes over 90 seconds (measured), and every
+    second of it is spent holding _YTDLP_LOCK — which also blocks
+    resolve_direct_url(), so the currently-playing track cannot start the next
+    one and the whole app appears to hang.  Flat extraction of the same
+    playlist takes about 1.5 seconds.
+
+    Entries come back as stubs: id/url/title/duration/view_count, no formats.
+    Resolve the single chosen entry afterwards with dump_info().
+    """
+    with _YTDLP_LOCK:
+        try:
+            import yt_dlp
+            opts = {
+                **_BASE_OPTS,
+                "extract_flat": "in_playlist",
+                "ignoreerrors": True,
+                "playlistend":  limit,
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if not info:
+                return []
+            # ignoreerrors leaves None in place of unavailable items.
+            return [e for e in (info.get("entries") or []) if e]
+        except Exception as exc:
+            print(f"[ytdlp_util] flat_entries failed for {url!r}: {exc}")
+            return []

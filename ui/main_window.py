@@ -1321,7 +1321,13 @@ class MainWindow(QMainWindow):
         # request landing after the queue runs dry, etc.
         # _on_queue_changed can be called from background threads (QueueManager
         # notifies directly), so defer the play to the main thread via a timer.
-        if not self._user_stopped and self.engine.state == PlayState.STOPPED:
+        # is_advancing: skip() pops the next track and plays it as two steps,
+        # and pop_next() notifies synchronously in between.  Without this the
+        # notification lands while the engine is momentarily STOPPED and we
+        # auto-start a *second* track — which pops again, and so on.
+        if (not self._user_stopped
+                and not self.engine.is_advancing
+                and self.engine.state == PlayState.STOPPED):
             QTimer.singleShot(0, self._maybe_autostart)
 
     @Slot()
@@ -1338,7 +1344,10 @@ class MainWindow(QMainWindow):
         The guard prevents double-pops if both paths fire close together, and
         also respects user-stop (■ button) which parks the current track.
         """
-        if self._closing or self._user_stopped or self.engine.state != PlayState.STOPPED:
+        if (self._closing
+                or self._user_stopped
+                or self.engine.is_advancing
+                or self.engine.state != PlayState.STOPPED):
             return
         track = self.queue.pop_next()
         if track:
@@ -1361,14 +1370,29 @@ class MainWindow(QMainWindow):
         #   b) if the user enables cover_art_match mid-song, _on_settings_applied
         #      can apply the cached result instantly without a new network request.
         self._cached_art_colours = None  # clear stale colours from previous track
-        if getattr(track, "thumbnail_url", None):
+        art_source = self._art_source_for(track)
+        if art_source:
             import threading
             threading.Thread(
                 target=self._fetch_art_colours,
-                args=(track.thumbnail_url,),
+                args=(art_source,),
                 daemon=True,
                 name="ArtColours",
             ).start()
+
+    @staticmethod
+    def _art_source_for(track: Track) -> str:
+        """Where this track's cover art comes from.
+
+        Remote tracks have a thumbnail URL.  Local files carry their artwork
+        inside the audio file, so the file itself is the source — deliberately
+        not stored in thumbnail_url, which is published to the mod panel and
+        would otherwise leak the path.
+        """
+        from player.queue_manager import TrackSource
+        if track.source == TrackSource.LOCAL:
+            return track.stream_url or ""
+        return getattr(track, "thumbnail_url", "") or ""
 
     def _fetch_art_colours(self, url: str) -> None:
         """Worker (background thread): extract gradient and emit signal."""

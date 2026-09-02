@@ -31,7 +31,7 @@ import random
 import threading
 from typing import TYPE_CHECKING
 
-from player.queue_manager import QueueManager, Track
+from player.queue_manager import QueueManager, Track, TrackSource
 
 if TYPE_CHECKING:
     from player.playlist_manager import PlaylistTrack
@@ -98,7 +98,10 @@ class VibeEngine:
                     # User toggled off/on mid-playlist → switch to current-track
                     # lynchpin (single-song mode, no threshold).
                     self._playlist_vibe_from_start = False
-                self._lynchpin = current_track
+                # Local files are never a usable seed (see _maybe_fill), so
+                # keep the previous lynchpin rather than adopting one.
+                if current_track is None or current_track.source != TrackSource.LOCAL:
+                    self._lynchpin = current_track
                 # Single-song lynchpin never uses the threshold, so no counter
                 # manipulation needed — _maybe_fill will fill immediately.
                 do_fill = True
@@ -273,6 +276,14 @@ class VibeEngine:
                     # Don't reset the counter — retry on the next track start.
                     return
 
+                # A local file cannot seed YouTube suggestions: its stream_url
+                # is a filesystem path, and the suggestion fetcher would be
+                # asked to find tracks "related to" C:\Music\song.mp3.  Vibe
+                # simply has nothing to say about local media, so skip rather
+                # than fetch nonsense.
+                if seed.source == TrackSource.LOCAL:
+                    return
+
                 recent_snapshot  = list(self._recent_urls)
                 artist_snapshot  = list(self._artist_history)
 
@@ -314,6 +325,7 @@ class VibeEngine:
         candidates = [
             pt for pt in self._playlist_tracks
             if (pt.stream_url or "") not in hard_exclude
+            and pt.source != TrackSource.LOCAL
         ]
         if not candidates:
             candidates = self._playlist_tracks  # all excluded — pick anyway

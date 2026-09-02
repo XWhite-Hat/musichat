@@ -1,4 +1,4 @@
-﻿"""
+"""
 Playback engine.
 
 Architecture
@@ -13,6 +13,7 @@ Queue auto-advance is scheduled back onto the Qt event loop via QTimer.singleSho
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -94,6 +95,11 @@ class PlaybackEngine:
         # report_underruns() on the Qt thread.  A plain int += is fine
         # here: CPython makes it atomic enough for a counter that only one
         # thread increments, and it costs no allocation on the audio path.
+        # True while skip()/play_track() is between tearing the old stream
+        # down and starting the new one.  During that gap the engine looks
+        # STOPPED to observers even though a track IS on its way, and
+        # anything that auto-starts on 'engine idle' must not act on it.
+        self._advancing = False
         self._underrun_count = 0
         self._underruns_reported = 0
         self._yt_proc = None  # yt-dlp subprocess for web streams
@@ -184,12 +190,34 @@ class PlaybackEngine:
         self._set_state(PlayState.STOPPED)
         self.queue_manager.set_current(None)
 
+    @property
+    def is_advancing(self) -> bool:
+        """True while a track change is in flight.
+
+        Callers that start playback when the engine is idle must check this
+        first.  skip() pops the next track and only then plays it, so in
+        between the two the engine is STOPPED with a freshly-changed queue —
+        which is indistinguishable from 'idle with a new track waiting'
+        unless this flag is consulted.
+        """
+        return self._advancing
+
     def skip(self) -> None:
-        next_track = self.queue_manager.skip()
-        if next_track:
-            self.play_track(next_track)
-        else:
-            self.stop()
+        # Held across the whole pop-then-play sequence.  pop_next() fires
+        # on_queue_changed synchronously, and that listener auto-starts the
+        # next track whenever the engine looks idle — so without this guard
+        # a single skip pops one track, the notification pops another, and
+        # each pop invites the next until the queue is empty.  Spamming
+        # !skip made that runaway obvious.
+        self._advancing = True
+        try:
+            next_track = self.queue_manager.skip()
+            if next_track:
+                self.play_track(next_track)
+            else:
+                self.stop()
+        finally:
+            self._advancing = False
 
     def set_output_device(self, device: int | None) -> None:
         """Hot-swap the output device. Restarts the stream at the current position
@@ -422,6 +450,15 @@ class PlaybackEngine:
             audio_source = resolved
             self._last_audio_source = audio_source   # cache for future seeks
         else:
+            # A local file may have moved, been renamed, or live on a drive
+            # that is not mounted right now.  URLs never had this state, so
+            # nothing downstream expects it: without this check av.open() fails
+            # deep in the decode thread and the track simply stalls.  Bail out
+            # early instead, so the queue advances like any other failure.
+            if not stream_url.startswith("http") and not os.path.isfile(stream_url):
+                print(f"[engine] file not found, skipping: {stream_url}")
+                self._pcm_queue.put(None)
+                return
             audio_source = stream_url
             self._last_audio_source = audio_source
 

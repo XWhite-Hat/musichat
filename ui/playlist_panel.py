@@ -1,4 +1,4 @@
-﻿"""
+"""
 Playlists tab — browse, create, rename, delete playlists and their tracks.
 
 Layout
@@ -21,7 +21,9 @@ _TOPIC_SUFFIX = _re.compile(r'\s*[-–]\s*Topic\s*$', _re.IGNORECASE)
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -105,9 +108,9 @@ class PlaylistPanel(QWidget):
         new_btn.clicked.connect(self._create_playlist)
         left_layout.addWidget(new_btn)
 
-        import_btn = QPushButton("↓ Import URL")
-        import_btn.clicked.connect(self._import_playlist)
-        left_layout.addWidget(import_btn)
+        self._import_btn = QPushButton("↓ Import URL")
+        self._import_btn.clicked.connect(self._import_playlist)
+        left_layout.addWidget(self._import_btn)
 
         splitter.addWidget(left)
 
@@ -174,9 +177,11 @@ class PlaylistPanel(QWidget):
             m, s = divmod(dur, 60)
             h, m = divmod(m, 60)
             dur_str = f'{h}:{m:02d}:{s:02d}' if h else f'{m}:{s:02d}'
-            item = QListWidgetItem(f"{pl.name}  ({pl.track_count()} tracks)")
+            marker = "♪ " if pl.is_local else ""
+            item = QListWidgetItem(f"{marker}{pl.name}  ({pl.track_count()} tracks)")
             item.setData(Qt.ItemDataRole.UserRole, pl.id)
-            item.setToolTip(f"{pl.track_count()} tracks · {dur_str}")
+            kind = "local files" if pl.is_local else "streaming"
+            item.setToolTip(f"{pl.track_count()} tracks · {dur_str} · {kind}")
             self._pl_list.addItem(item)
             if pl.id == prev_id:
                 select_row = i
@@ -187,8 +192,19 @@ class PlaylistPanel(QWidget):
             self._selected_playlist = None
             self._refresh_tracks()
 
+    def _sync_import_button(self) -> None:
+        """Label the import action for whatever the selected playlist accepts."""
+        pl = self._selected_playlist
+        if pl is not None and pl.is_local:
+            self._import_btn.setText("↓ Add local files")
+            self._import_btn.setToolTip("Add audio files from this computer")
+        else:
+            self._import_btn.setText("↓ Import URL")
+            self._import_btn.setToolTip("Import a YouTube or SoundCloud playlist")
+
     def _refresh_tracks(self) -> None:
         self._track_list.clear()
+        self._sync_import_button()
         if self._selected_playlist is None:
             self._pl_name_lbl.setText("Select a playlist")
             return
@@ -237,13 +253,25 @@ class PlaylistPanel(QWidget):
         menu.exec(self._pl_list.mapToGlobal(pos))
 
     def _create_playlist(self) -> None:
-        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
-        if ok and name.strip():
-            self._pm.create(name.strip())
+        dlg = NewPlaylistDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, is_local = dlg.result_values()
+        if name:
+            self._pm.create(name, is_local=is_local)
 
     def _import_playlist(self) -> None:
-        dlg = ImportPlaylistDialog(self._pm, self)
-        dlg.exec()
+        """Import into the selected playlist, using whichever source it accepts.
+
+        A local-only playlist takes files from disk; a streaming playlist takes
+        a URL.  The two are never offered together — that separation is the
+        whole point of the local-only flag.
+        """
+        pl = self._selected_playlist
+        if pl is not None and pl.is_local:
+            ImportLocalFilesDialog(self._pm, pl, self).exec()
+            return
+        ImportPlaylistDialog(self._pm, self).exec()
 
     def _rename_playlist(self, pl_id: str) -> None:
         pl = self._pm.get(pl_id)
@@ -430,6 +458,245 @@ class _PlaylistFetchThread(QThread):
     def run(self) -> None:
         from player.ytdlp_util import resolve_playlist
         self.finished.emit(resolve_playlist(self._url))
+
+
+class NewPlaylistDialog(QDialog):
+    """Name a new playlist and choose whether it holds local files or streams.
+
+    The choice is made up front and not changed afterwards: converting a
+    playlist between kinds would mean either discarding its contents or
+    carrying both, and carrying both is exactly what the split avoids.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New Playlist")
+        self.setMinimumWidth(420)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+
+        lay.addWidget(QLabel("Playlist name:"))
+        self._name = QLineEdit()
+        self._name.setPlaceholderText("New Playlist")
+        self._name.returnPressed.connect(self._accept_if_named)
+        lay.addWidget(self._name)
+
+        self._local = QCheckBox("Local files only (music from this computer)")
+        lay.addWidget(self._local)
+
+        self._hint = QLabel()
+        self._hint.setWordWrap(True)
+        self._hint.setObjectName("hint")
+        lay.addWidget(self._hint)
+        self._local.toggled.connect(self._update_hint)
+        self._update_hint(False)
+
+        foot = QHBoxLayout()
+        foot.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        create = QPushButton("Create")
+        create.setObjectName("accent")
+        create.clicked.connect(self._accept_if_named)
+        foot.addWidget(cancel)
+        foot.addWidget(create)
+        lay.addLayout(foot)
+
+    def _update_hint(self, checked: bool) -> None:
+        self._hint.setText(
+            "Holds audio files from your computer. Chat cannot request from it, "
+            "and file paths are never shown in the mod panel."
+            if checked else
+            "Holds YouTube and SoundCloud tracks. This is the usual choice."
+        )
+
+    def _accept_if_named(self) -> None:
+        if self._name.text().strip():
+            self.accept()
+
+    def result_values(self) -> tuple[str, bool]:
+        return self._name.text().strip(), self._local.isChecked()
+
+
+class _LocalProbeThread(QThread):
+    """Background thread: reads metadata from a list of audio files.
+
+    Probing opens and closes a container per file — roughly 10ms each, which is
+    nothing for twenty files and several seconds for a few thousand.  Doing it
+    on the Qt thread would look exactly like a freeze, so it runs here and
+    reports progress as it goes.
+    """
+
+    progress = Signal(int, int)          # done, total
+    finished = Signal(object)            # list[PlaylistTrack]
+
+    def __init__(self, paths: list[str]) -> None:
+        super().__init__()
+        self._paths = paths
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        from player.local_media import probe
+        from player.queue_manager import TrackSource
+
+        out: list[PlaylistTrack] = []
+        total = len(self._paths)
+        for i, path in enumerate(self._paths, 1):
+            if self._cancelled:
+                break
+            data = probe(path)
+            if data:
+                out.append(PlaylistTrack(
+                    title=data["title"],
+                    artist=data["artist"],
+                    stream_url=data["filepath"],
+                    thumbnail_url="",
+                    duration_seconds=data["duration"],
+                    source=TrackSource.LOCAL.name,
+                ))
+            self.progress.emit(i, total)
+        self.finished.emit(out)
+
+
+class ImportLocalFilesDialog(QDialog):
+    """
+    Add audio files from disk to a local-only playlist.
+
+    Two entry points — pick files, or pick a folder and scan it — then probe
+    everything on a worker thread and append what came back.  Files that cannot
+    be read are counted and skipped rather than aborting the import, because a
+    real music library always contains a few.
+    """
+
+    def __init__(self, pm: PlaylistManager, playlist: Playlist, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Add Local Files — {playlist.name}")
+        self.setMinimumWidth(520)
+        self._pm = pm
+        self._playlist = playlist
+        self._thread: _LocalProbeThread | None = None
+        self._tracks: list[PlaylistTrack] = []
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+
+        lay.addWidget(QLabel(
+            f"Add music from this computer to <b>{self._playlist.name}</b>."
+        ))
+
+        btn_row = QHBoxLayout()
+        files_btn = QPushButton("Choose files…")
+        files_btn.clicked.connect(self._pick_files)
+        folder_btn = QPushButton("Choose folder…")
+        folder_btn.clicked.connect(self._pick_folder)
+        btn_row.addWidget(files_btn)
+        btn_row.addWidget(folder_btn)
+        btn_row.addStretch(1)
+        lay.addLayout(btn_row)
+
+        self._status = QLabel("No files selected yet.")
+        self._status.setWordWrap(True)
+        lay.addWidget(self._status)
+
+        self._progress = QProgressBar()
+        self._progress.setVisible(False)
+        lay.addWidget(self._progress)
+
+        foot = QHBoxLayout()
+        foot.addStretch(1)
+        self._cancel_btn = QPushButton("Close")
+        self._cancel_btn.clicked.connect(self._on_close)
+        self._add_btn = QPushButton("Add to playlist")
+        self._add_btn.setObjectName("accent")
+        self._add_btn.setEnabled(False)
+        self._add_btn.clicked.connect(self._commit)
+        foot.addWidget(self._cancel_btn)
+        foot.addWidget(self._add_btn)
+        lay.addLayout(foot)
+
+    # ── Selection ──────────────────────────────────────────────────────────
+
+    def _extension_filter(self) -> str:
+        from player.local_media import SUPPORTED_EXTENSIONS
+        pattern = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTENSIONS))
+        return f"Audio files ({pattern});;All files (*)"
+
+    def _pick_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select audio files", "", self._extension_filter()
+        )
+        if paths:
+            self._start_probe(paths)
+
+    def _pick_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select a music folder")
+        if not folder:
+            return
+        from player.local_media import scan_directory
+        paths = scan_directory(folder, recursive=True)
+        if not paths:
+            self._status.setText("No supported audio files found in that folder.")
+            return
+        self._start_probe(paths)
+
+    # ── Probing ────────────────────────────────────────────────────────────
+
+    def _start_probe(self, paths: list[str]) -> None:
+        self._add_btn.setEnabled(False)
+        self._progress.setVisible(True)
+        self._progress.setRange(0, len(paths))
+        self._progress.setValue(0)
+        self._status.setText(f"Reading {len(paths)} file(s)…")
+
+        self._thread = _LocalProbeThread(paths)
+        self._thread.progress.connect(self._on_progress)
+        self._thread.finished.connect(lambda t: self._on_probed(t, len(paths)))
+        self._thread.start()
+
+    def _on_progress(self, done: int, total: int) -> None:
+        self._progress.setValue(done)
+
+    def _on_probed(self, tracks: list, attempted: int) -> None:
+        self._thread = None
+        self._progress.setVisible(False)
+        self._tracks = tracks
+        skipped = attempted - len(tracks)
+        msg = f"Ready to add {len(tracks)} track(s)."
+        if skipped:
+            msg += f"  {skipped} file(s) could not be read and will be skipped."
+        self._status.setText(msg)
+        self._add_btn.setEnabled(bool(tracks))
+
+    # ── Commit ─────────────────────────────────────────────────────────────
+
+    def _commit(self) -> None:
+        added = self._pm.add_tracks(self._playlist.id, self._tracks)
+        if added == 0:
+            self._status.setText("Nothing was added — the playlist may have been deleted.")
+            return
+        self.accept()
+
+    def _on_close(self) -> None:
+        if self._thread is not None:
+            self._thread.cancel()
+            self._thread.wait(2000)
+        self.reject()
+
+    def closeEvent(self, event) -> None:   # Qt naming, not ours
+        if self._thread is not None:
+            self._thread.cancel()
+            self._thread.wait(2000)
+        super().closeEvent(event)
 
 
 class ImportPlaylistDialog(QDialog):

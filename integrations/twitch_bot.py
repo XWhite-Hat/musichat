@@ -36,6 +36,12 @@ except ImportError:
     HAS_TWITCHIO = False
 
 
+# Minimum gap between two !skip commands taking effect.  Short enough that a
+# mod can still skip twice deliberately, long enough that a spammed command
+# or several mods reacting at once cannot walk the queue.
+SKIP_DEBOUNCE_SECONDS = 2.0
+
+
 class TwitchBot:
     def __init__(
         self,
@@ -89,6 +95,10 @@ class TwitchBot:
 
         # Cooldown tracking: username → last request timestamp
         self._cooldowns: dict[str, float] = {}
+        # Channel-wide debounce for !skip.  Separate from _cooldowns, which
+        # is per-user and applies to requests only — skip had no throttle of
+        # any kind, so a burst of commands walked straight through the queue.
+        self._last_skip_at: float = 0.0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._bot: object | None = None
@@ -604,6 +614,20 @@ class TwitchBot:
         self._cooldowns[username] = now
         return True
 
+    def _check_skip_debounce(self) -> bool:
+        """Collapse skips arriving within SKIP_DEBOUNCE_SECONDS of each other.
+
+        Deliberately channel-wide rather than per-user: the queue is a shared
+        resource, and several mods reacting to the same bad song would
+        otherwise skip several songs.  It is short enough that intentional
+        back-to-back skips still work.
+        """
+        now = time.time()
+        if now - self._last_skip_at < SKIP_DEBOUNCE_SECONDS:
+            return False
+        self._last_skip_at = now
+        return True
+
     def _check_request_cap(self, username: str, queue_limit: int) -> bool:
         if queue_limit == 0:
             return True
@@ -692,6 +716,10 @@ if HAS_TWITCHIO:
         async def cmd_skip(self, ctx: tw_commands.Context) -> None:
             if not self.ctrl._has_skip_permission(ctx.chatter):
                 await ctx.send(f"@{ctx.chatter.name} you don't have permission to skip")
+                return
+            if not self.ctrl._check_skip_debounce():
+                # Silently ignored rather than answered: a spammed command would
+                # otherwise produce a burst of chat replies of its own.
                 return
             current = self.queue.current
             if self.ctrl.on_skip_requested:

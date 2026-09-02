@@ -182,8 +182,14 @@ def _run_smoke_test_subprocess(data_dir: str) -> None:
 
 
 def _read_bootstrap_config(path: Path) -> dict | None:
+    # utf-8-sig, not utf-8: a byte-order mark makes json.load raise, which is
+    # indistinguishable here from "no config yet" — so the app silently reruns
+    # the first-run wizard and looks like it has forgotten its data folder.
+    # We never write a BOM ourselves, but anything that rewrites this file
+    # might (PowerShell's Set-Content -Encoding utf8 does), and the symptom is
+    # far too confusing for the one-word fix it takes to tolerate.
     try:
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             return json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
         return None

@@ -74,7 +74,24 @@ def load_or_generate() -> dict:
 
 
 def get_public_jwk() -> dict | None:
-    """Return the current public JWK, or None if not yet initialized."""
+    """Return the current public JWK, initialising the keypair if needed.
+
+    Callers use this to register the key with the Worker, and both of them
+    previously did nothing at all when it returned None.  Since the Worker
+    treats "no key registered" as a reason to skip DPoP entirely, a keypair
+    that failed to load at startup quietly downgraded that broadcaster to
+    bearer-token-only auth — permanently, and with no signal.
+
+    load_or_generate() is idempotent and persists what it creates, so
+    recovering here is safe and costs one keyring read at most.
+    """
+    global _public_jwk
+    if _public_jwk is None:
+        try:
+            load_or_generate()
+        except Exception as exc:
+            print(f"[dpop] could not initialise keypair: {exc!r}")
+            return None
     return dict(_public_jwk) if _public_jwk else None
 
 

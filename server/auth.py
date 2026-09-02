@@ -252,19 +252,42 @@ def sync_dpop_key(
     jwk = _dpop.get_public_jwk()
     if not jwk:
         return False
-    try:
-        _url = f"{worker_url}/sync-dpop-key"
-        resp = requests.post(
-            _url,
-            json={"access_token": access_token, "broadcaster_id": broadcaster_id, "dpop_jwk": jwk},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        print("[auth] DPoP key synced with Worker", file=__import__("sys").stderr)
-        return True
-    except Exception as e:
-        print(f"[auth] sync_dpop_key failed: {e}", file=__import__("sys").stderr)
-        return False
+    # Retried rather than best-effort.  A broadcaster with no key registered is
+    # treated by the Worker as "DPoP not available" and falls back to bearer
+    # tokens, so losing this one call to a transient network blip at startup
+    # silently weakens that broadcaster's auth for the whole session — and now
+    # that DPOP_REQUIRED is on, it locks them out instead.  Cheap to retry.
+    import sys as _sys
+    import time as _time
+
+    _url = f"{worker_url}/sync-dpop-key"
+    payload = {
+        "access_token":   access_token,
+        "broadcaster_id": broadcaster_id,
+        "dpop_jwk":       jwk,
+    }
+
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            resp = requests.post(_url, json=payload, timeout=10)
+            # 4xx other than 429 means the request itself is wrong — retrying
+            # an unacceptable token or a malformed key just wastes time.
+            if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                print(f"[auth] sync_dpop_key rejected: HTTP {resp.status_code}",
+                      file=_sys.stderr)
+                return False
+            resp.raise_for_status()
+            print("[auth] DPoP key synced with Worker", file=_sys.stderr)
+            return True
+        except Exception as e:
+            last_error = e
+            if attempt < 3:
+                _time.sleep(attempt * 2)      # 2s, then 4s
+
+    print(f"[auth] sync_dpop_key failed after 3 attempts: {last_error}",
+          file=_sys.stderr)
+    return False
 
 
 def refresh_access_token(

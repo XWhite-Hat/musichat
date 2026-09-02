@@ -208,13 +208,27 @@ class Track:
     redemption_id:        str = ""   # Twitch redemption UUID
     redemption_reward_id: str = ""   # Twitch reward UUID (required by the PATCH endpoint)
 
+    def _title_fallback(self) -> str:
+        """Stand-in when a track has no title.
+
+        For a remote track the URL is a reasonable label.  For a local file it
+        is an absolute filesystem path, and display_title() feeds both the
+        !currentsong chat announcement and the mod-panel payload — so the bare
+        filename is used instead of broadcasting the directory structure.
+        """
+        if self.source == TrackSource.LOCAL:
+            import os
+            return os.path.splitext(os.path.basename(self.url or ""))[0]
+        return self.url
+
     def display_title(self) -> str:
+        fallback = self._title_fallback()
         display_artist, clean_title = _merge_credited_artists(
-            self.title or self.url, self.artist or ""
+            self.title or fallback, self.artist or ""
         )
         if display_artist:
             return f"{display_artist} — {clean_title}"
-        return clean_title or self.url
+        return clean_title or fallback
 
 
 class QueueManager:
@@ -475,10 +489,15 @@ class QueueManager:
     def _track_dict(t: Track | None) -> dict | None:
         if t is None:
             return None
+        # This payload is pushed to the mod panel, which is reachable by every
+        # moderator over the public tunnel.  For a local file `url` is a
+        # filesystem path, and directory names alone say a great deal about the
+        # streamer's machine — so it is withheld for LOCAL tracks.  Remote
+        # tracks keep it: the panel links back to the YouTube/SoundCloud page.
         return {
             "id": t.id,
             "title": t.display_title(),
-            "url": t.url,
+            "url": "" if t.source == TrackSource.LOCAL else t.url,
             "thumbnail": t.thumbnail_url,
             "duration": t.duration_seconds,
             "source": t.source.name,

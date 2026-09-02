@@ -47,15 +47,44 @@ _TOKEN_RL: dict[str, deque] = {}
 _TOKEN_RL_MAX   = 20
 _TOKEN_RL_WINDOW = 60  # seconds
 
+# Header-independent ceiling across all callers.
+#
+# The per-IP bucket above is keyed on CF-Connecting-IP when the TCP peer is
+# loopback, which every tunnelled request is.  Anyone able to reach the
+# loopback port directly can therefore rotate that header per request and get
+# a fresh bucket each time, escaping the per-IP limit entirely.  That requires
+# local code execution, so it is not the primary defence — but a limiter that
+# can be stepped around by editing a header is not much of a limiter, and a
+# global cap costs nothing to add.
+#
+# Sized well above any legitimate pattern: token issuance happens when a mod
+# signs in, not continuously, so real traffic never approaches this.
+_TOKEN_RL_GLOBAL: deque = deque()
+_TOKEN_RL_GLOBAL_MAX = 120       # per window, across every caller
+_TOKEN_RL_LOCK = threading.Lock()
+
+
 def _token_rate_ok(ip: str) -> bool:
     now = time.monotonic()
-    dq  = _TOKEN_RL.setdefault(ip, deque())
-    while dq and now - dq[0] > _TOKEN_RL_WINDOW:
-        dq.popleft()
-    if len(dq) >= _TOKEN_RL_MAX:
-        return False
-    dq.append(now)
-    return True
+    with _TOKEN_RL_LOCK:
+        # Global ceiling first — a forged header must not be able to skip it.
+        while _TOKEN_RL_GLOBAL and now - _TOKEN_RL_GLOBAL[0] > _TOKEN_RL_WINDOW:
+            _TOKEN_RL_GLOBAL.popleft()
+        if len(_TOKEN_RL_GLOBAL) >= _TOKEN_RL_GLOBAL_MAX:
+            print("[auth] /auth/token global rate ceiling hit — refusing")
+            return False
+
+        dq = _TOKEN_RL.setdefault(ip, deque())
+        while dq and now - dq[0] > _TOKEN_RL_WINDOW:
+            dq.popleft()
+        if len(dq) >= _TOKEN_RL_MAX:
+            return False
+
+        # Only counted against the global budget once the per-IP check passes,
+        # so a single spammer being refused cannot exhaust everyone else's.
+        dq.append(now)
+        _TOKEN_RL_GLOBAL.append(now)
+        return True
 
 
 def _real_client_ip(request: Request) -> str:

@@ -82,14 +82,12 @@ def search_soundcloud(query: str, max_results: int = 10) -> list[Track]:
 
 
 def _is_internal_host(netloc: str) -> bool:
-    import ipaddress as _ip
-    import socket as _sock
-    host = netloc.split(":")[0]
-    try:
-        addr = _ip.ip_address(_sock.gethostbyname(host))
-        return addr.is_private or addr.is_loopback or addr.is_link_local
-    except Exception:
-        return False
+    # Delegates to the shared guard so there is one implementation rather than
+    # two that can drift.  The local version this replaced returned False on
+    # any exception — so an unresolvable host was treated as safe — checked
+    # only the first IPv4 record, and missed reserved/multicast ranges.
+    from player.net_guard import is_internal_host
+    return is_internal_host(netloc)
 
 
 def resolve_url(url: str) -> Track | None:

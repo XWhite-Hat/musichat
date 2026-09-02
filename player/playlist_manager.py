@@ -77,6 +77,18 @@ class Playlist:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = "New Playlist"
     tracks: list[PlaylistTrack] = field(default_factory=list)
+    # A playlist holds either local files or streamed tracks, never both.
+    #
+    # Mixing them means every consumer has to cope with two very different
+    # failure modes in one list — a missing file next to a geo-blocked video,
+    # a path next to a URL — and the import UI would have to offer both kinds
+    # of "add" on the same playlist.  Keeping the two apart makes each one
+    # simple to reason about.
+    is_local: bool = False
+
+    def accepts(self, source: TrackSource) -> bool:
+        """True if a track from *source* belongs in this playlist."""
+        return (source == TrackSource.LOCAL) == self.is_local
 
     def track_count(self) -> int:
         return len(self.tracks)
@@ -108,8 +120,8 @@ class PlaylistManager:
 
     # ── Mutations ──────────────────────────────────────────────────────────────
 
-    def create(self, name: str = "New Playlist") -> Playlist:
-        pl = Playlist(name=name.strip() or "New Playlist")
+    def create(self, name: str = "New Playlist", is_local: bool = False) -> Playlist:
+        pl = Playlist(name=name.strip() or "New Playlist", is_local=is_local)
         self._playlists.append(pl)
         self._save()
         self._notify()
@@ -137,10 +149,45 @@ class PlaylistManager:
         pl = self.get(playlist_id)
         if pl is None:
             return False
+        if not pl.accepts(track.source):
+            kind = "local-only" if pl.is_local else "streaming"
+            print(
+                f"[playlists] refused {track.source.name} track "
+                f"'{track.title[:40]}' — '{pl.name}' is a {kind} playlist"
+            )
+            return False
         pl.tracks.append(PlaylistTrack.from_track(track))
         self._save()
         self._notify()
         return True
+
+    def add_tracks(self, playlist_id: str, tracks: list[PlaylistTrack]) -> int:
+        """Append several already-built PlaylistTracks; returns how many landed.
+
+        Bulk import writes once rather than once per file — a folder of a few
+        thousand songs would otherwise rewrite playlists.json a few thousand
+        times.  Entries whose source does not match the playlist kind are
+        dropped, so this cannot be used to sneak past the local/streaming split.
+        """
+        pl = self.get(playlist_id)
+        if pl is None:
+            return 0
+
+        kept = []
+        for t in tracks:
+            try:
+                source = TrackSource[t.source]
+            except KeyError:
+                continue
+            if pl.accepts(source):
+                kept.append(t)
+
+        if not kept:
+            return 0
+        pl.tracks.extend(kept)
+        self._save()
+        self._notify()
+        return len(kept)
 
     def remove_track(self, playlist_id: str, track_id: str) -> bool:
         pl = self.get(playlist_id)
@@ -209,6 +256,9 @@ class PlaylistManager:
                     id=pl_data.get("id", str(uuid.uuid4())),
                     name=pl_data.get("name", "Unnamed"),
                     tracks=tracks,
+                    # Absent in files written before local playlists existed,
+                    # which is correct: everything back then was streamed.
+                    is_local=bool(pl_data.get("is_local", False)),
                 ))
         except Exception as exc:
             print(f"[playlists] load error: {exc}")
@@ -220,14 +270,25 @@ class PlaylistManager:
                 {
                     "id": pl.id,
                     "name": pl.name,
+                    "is_local": pl.is_local,
                     "tracks": [asdict(t) for t in pl.tracks],
                 }
                 for pl in self._playlists
             ]
         }
+        # Written to a temporary file and renamed over the target.  Opening
+        # PLAYLISTS_PATH directly truncates it before the new content lands, so
+        # a crash at that moment loses every playlist — which matters more now
+        # that one may represent a whole imported library.  os.replace() is
+        # atomic on Win32 and POSIX.
+        tmp_path = PLAYLISTS_PATH + ".tmp"
         try:
-            with open(PLAYLISTS_PATH, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, indent=2, ensure_ascii=False)
+            payload = json.dumps(data, indent=2, ensure_ascii=False)
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, PLAYLISTS_PATH)
         except Exception as exc:
             print(f"[playlists] save error: {exc}")
 

@@ -72,19 +72,43 @@ def extract_gradient(image_url: str) -> tuple[str, str, str]:
 
 # ── Internals ──────────────────────────────────────────────────────────────────
 
-def _fetch(url: str):
-    """Download *url* and return a small (64×64) PIL Image in RGB, or None."""
+def _fetch(source: str):
+    """Return a small (64×64) RGB image for *source*, or None.
+
+    *source* is either a URL to download or, for a local track, the path of the
+    audio file itself — in which case the artwork is read from the file's
+    embedded cover rather than fetched over the network.
+    """
     try:
-        import requests
         from PIL import Image
 
-        resp = requests.get(url, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-        img = img.resize((64, 64), Image.LANCZOS)
-        return img
+        raw = _load_bytes(source)
+        if raw is None:
+            return None
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        return img.resize((64, 64), Image.LANCZOS)
     except Exception:
         return None
+
+
+def _load_bytes(source: str) -> bytes | None:
+    """Raw image bytes for a URL or a local audio file."""
+    if not source:
+        return None
+
+    if source.startswith(("http://", "https://")):
+        try:
+            import requests
+            resp = requests.get(source, timeout=6,
+                                headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            return resp.content
+        except Exception:
+            return None
+
+    # A local track hands us the audio file; its cover is inside it.
+    from player.local_media import extract_cover_art
+    return extract_cover_art(source)
 
 
 def _dominant_rgb(img, n: int = 16) -> list[tuple[int, int, int]]:
