@@ -8,4 +8,4 @@
 # a floating ruff would let a new release fail CI on code nobody touched.
 # The CI lint job installs from THIS file so the two can never drift apart.
 pytest>=9.1.1
-ruff==0.16.5
+ruff==0.16.6
