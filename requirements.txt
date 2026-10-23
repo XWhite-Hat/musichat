@@ -13,7 +13,7 @@ python-multipart>=0.0.32
 websockets>=17.2
 httpx>=0.28.1
 yt-dlp>=2026.8.19,<2027.1.0
-Pillow>=12.3.0         # <12.3 has GHSA-45hq-cxwh-f6vc (decompression-bomb bypass, HIGH)
+Pillow>=13.0.0         # <12.3 has GHSA-45hq-cxwh-f6vc (decompression-bomb bypass, HIGH)
 
 # Transitive (twitchio, yt-dlp) - floor pinned here for security only:
 # <3.14.3 has GHSA-cq5v-8q36-5273 (OOB heap read in the C parser, HIGH)
