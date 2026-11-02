@@ -12,7 +12,7 @@ keyring>=25.7.0
 python-multipart>=0.0.32
 websockets>=17.3
 httpx>=0.28.1
-yt-dlp>=2026.10.21,<2027.1.0
+yt-dlp>=2026.10.26,<2027.1.0
 Pillow>=12.3.0         # <12.3 has GHSA-45hq-cxwh-f6vc (decompression-bomb bypass, HIGH)
 
 # Transitive (twitchio, yt-dlp) - floor pinned here for security only:
