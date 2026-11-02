@@ -7,5 +7,5 @@
 # ruff is pinned exactly (not >=) because lint results must be reproducible:
 # a floating ruff would let a new release fail CI on code nobody touched.
 # The CI lint job installs from THIS file so the two can never drift apart.
-pytest>=9.1.1
+pytest>=9.2.0
 ruff==0.17.2
